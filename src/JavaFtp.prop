@@ -1,0 +1,17 @@
+JavaFtpServer.debug=true
+JavaFtpServer.logFile=C:/MyTemp/ftp.log
+
+ftpRoot C:/MyPrograms 
+#JavaFtpServer.authenticator Jmail.bringardner.ftp.FtpAcl
+
+#default.dbid Jmail
+#Jmail.jdbcDriver org.gjt.mm.mysql.Driver
+#Jmail.jdbcURL jdbc:mysql://localhost:3306/email
+#Jmail.jdbcUserid root
+#Jmail.jdbcPassword 0000
+
+#JavaFtpServer.SSLContext.keyFileName=C:/email/config/minEmallKeyStore04_07_05.jks
+#JavaFtpServer.SSLContext.keyStore=JKS
+#JavaFtpServer.SSLContext.passphrase=icu812
+#JavaFtpServer.SSLContext.instanceName=SunX509
+#JavaFtpServer.linger=300

@@ -1,0 +1,4 @@
+ #name , credentials, list of permissions, list of parameters
+ admin  , 0000      ,    ADMIN|SITE|READ|WRITE 
+ locked , 0000      ,    READ|WRITE	, userRoot=locked
+ open   , 0000      ,    READ|WRITE , defaultDir=/open
