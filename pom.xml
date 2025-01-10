@@ -5,7 +5,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>us.bringardner</groupId>
 	<version>0.1.0</version>
-	<artifactId>bjl_ftp</artifactId>
+	<artifactId>bjl_net_ftp</artifactId>
 	<name>NetFtp</name>
 	<inceptionYear>2004</inceptionYear>
 	<description>This project contains and implementation os the FTP protocol clients and servers.</description>
@@ -53,7 +53,7 @@
 							<include>**/*</include>
 						</includes>
 						<merge>true</merge>
-						<repositoryName>BjlFtp</repositoryName>
+						<repositoryName>BjlNetFtp</repositoryName>
 						<repositoryOwner>tony-bringardner</repositoryOwner>
 						<server>github</server>
 					</configuration>
@@ -84,7 +84,7 @@
 		<repository>
 			<id>github</id>
 			<name>tony-bringardner</name>
-			<url>https://maven.pkg.github.com/tony-bringardner/BjlFtp</url>
+			<url>https://maven.pkg.github.com/tony-bringardner/BjlNetFtp</url>
 		</repository>
 
 	</distributionManagement>

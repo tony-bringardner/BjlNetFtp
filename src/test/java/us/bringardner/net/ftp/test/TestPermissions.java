@@ -41,7 +41,6 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import junit.framework.TestCase;
 import us.bringardner.core.BjlLogger;
 import us.bringardner.core.ILogger;
 import us.bringardner.core.ILogger.Level;
@@ -138,7 +137,7 @@ public class TestPermissions {
 				} catch (InterruptedException e) {
 				}
 			}
-			TestCase.assertTrue(ftpServer.isRunning());
+			assertTrue(ftpServer.isRunning());
 			//System.out.println("Ftp server running on port "+ftpPort);
 
 		} catch(Throwable e) {

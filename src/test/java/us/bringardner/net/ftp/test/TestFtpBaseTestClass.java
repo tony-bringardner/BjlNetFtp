@@ -55,7 +55,6 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import junit.framework.TestCase;
 import us.bringardner.core.BjlLogger;
 import us.bringardner.core.ILogger;
 import us.bringardner.core.ILogger.Level;
@@ -258,7 +257,7 @@ public abstract class TestFtpBaseTestClass {
 				} catch (InterruptedException e) {
 				}
 			}
-			TestCase.assertTrue(ftpServer.isRunning());
+			assertTrue(ftpServer.isRunning());
 			//System.out.println("Ftp server running on port "+ftpPort);
 
 		} catch(Throwable e) {
@@ -552,11 +551,11 @@ public abstract class TestFtpBaseTestClass {
 			int ch = bin1.read();
 			int pos = 0;
 			while( ch > 0) {
-				TestCase.assertEquals(name+" compare pos="+pos,ch, bin2.read());
+				assertEquals(ch, bin2.read(),name+" compare pos="+pos);
 				pos++;
 				ch = bin1.read();				
 			}
-			TestCase.assertEquals(name+" compare pos="+pos,ch, bin2.read());
+			assertEquals(ch, bin2.read(),name+" compare pos="+pos);
 		} finally {
 			try {
 				in1.close();
