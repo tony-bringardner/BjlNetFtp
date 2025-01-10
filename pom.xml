@@ -92,7 +92,7 @@
 	<dependencies>
 		<dependency>
   			<groupId>us.bringardner</groupId>
-  			<artifactId>bjl_network_framework</artifactId>
+  			<artifactId>bjl_net</artifactId>
   			<version>0.1.0</version>
 		</dependency>
 		<dependency>
@@ -100,14 +100,28 @@
   			<artifactId>bjl_file_system</artifactId>
   			<version>0.1.0</version>
 		</dependency>
+		<dependency>
+  			<groupId>us.bringardner</groupId>
+  			<artifactId>bjl_net_framework</artifactId>
+  			<version>0.1.0</version>
+		</dependency>
 
 		<dependency>
-			<groupId>junit</groupId>
-			<artifactId>junit</artifactId>
-			<version>4.10</version>
-			<type>jar</type>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-engine</artifactId>
+			<version>5.11.4</version>
 			<scope>test</scope>
 		</dependency>
+
+		<!--
+		https://mvnrepository.com/artifact/org.junit.jupiter/junit-jupiter-api -->
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-api</artifactId>
+			<version>5.11.4</version>
+			<scope>test</scope>
+		</dependency>
+
 	</dependencies>
 
 
