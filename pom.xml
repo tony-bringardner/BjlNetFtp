@@ -89,12 +89,7 @@
 
 	</distributionManagement>
 
-	<dependencies>
-		<dependency>
-  			<groupId>us.bringardner</groupId>
-  			<artifactId>bjl_net</artifactId>
-  			<version>0.1.0</version>
-		</dependency>
+	<dependencies>	
 		<dependency>
   			<groupId>us.bringardner</groupId>
   			<artifactId>bjl_file_system</artifactId>
