@@ -4,7 +4,7 @@
 
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>us.bringardner</groupId>
-	<version>0.1.0</version>
+	<version>0.1.1</version>
 	<artifactId>bjl_net_ftp</artifactId>
 	<name>NetFtp</name>
 	<inceptionYear>2004</inceptionYear>
