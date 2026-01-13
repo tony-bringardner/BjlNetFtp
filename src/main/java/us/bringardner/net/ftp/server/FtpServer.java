@@ -270,7 +270,7 @@ public class FtpServer extends Server {
 				}
 				
 				@Override
-				public IPrincipal getPrincipal(String user, byte[] password) {
+				public IPrincipal getPrincipal(String user) {
 					if( !(user.equalsIgnoreCase("anonymous") || user.equalsIgnoreCase("ftp"))) {
 						return null;
 					}

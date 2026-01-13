@@ -167,8 +167,9 @@ public abstract class TestFtpBaseTestClass {
 			assertTrue(ok,"FtpClient can't connect to server");
 
 			if( useFileBasedAcl) {
-				IPrincipal p = acl.getPrincipal(user, password.getBytes());
-
+				IPrincipal p = acl.getPrincipal(user);
+				p.authenticate(password.getBytes());
+				
 				userRoot = (String)p.getParameter(FtpRequestProcessor.PARAMETER_ROOT);
 				
 				if( userRoot != null ) {
