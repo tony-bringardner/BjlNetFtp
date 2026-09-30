@@ -75,6 +75,10 @@ public class Rnfr  extends BaseCommand implements FtpCommand {
 		}
 			
 		FileSource target = processor.createNewFile(commandLine);
+		if( target == null ) {
+			processor.reply(REPLY_550_ACTION_NOT_TAKEN," Invalid name");
+			return;
+		}
 		commandLine = processor.getDisplayFileName(target.toString());
 		
 		if( !target.exists()){

@@ -130,6 +130,10 @@ public class Size extends BaseCommand implements FeatCommand {
 		}
 			
 		FileSource target = processor.createNewFile(commandLine);
+		if( target == null ) {
+			processor.reply(REPLY_550_ACTION_NOT_TAKEN," Invalid name");
+			return;
+		}
 		
 		if(target.isFile()){
 			processor.reply(REPLY_213_FILE_STATUS,""+target.length());

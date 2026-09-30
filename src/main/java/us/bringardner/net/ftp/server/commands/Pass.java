@@ -71,6 +71,7 @@ public class Pass extends NoAuthReqBaseCommand {
 	public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
 		if(!context.hasNext()) {
 			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Not enough parameters");
+			return;
 		}
 		
 			

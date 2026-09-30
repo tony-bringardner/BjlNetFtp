@@ -32,7 +32,6 @@ package us.bringardner.net.ftp.server.commands;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
 
 import us.bringardner.net.framework.server.IRequestContext;
 import us.bringardner.net.ftp.server.FtpCommand;
@@ -84,69 +83,42 @@ public class Port extends BaseCommand implements FtpCommand {
 			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Not enough parameters");
 			return;
 		}
-		String commandLine = context.getNextToken();
-        processor.logDebug("Enter port command '"+commandLine+"'");
-				
-		String parts [] = commandLine.split("[,]");
+		String commandLine = context.getNextToken().trim();
+		String parts [] = commandLine.split(",");
 		if( parts.length != 6) {
-			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Argument does not have 6 parts ="+parts.length);
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Argument must be h1,h2,h3,h4,p1,p2");
 			return;
 		}
-		
-		
-		//  This will set ACTIVE mode
-		processor.setPasvSocket(null);
-		String ipaddrStr=String.format("%s.%s.%s.%s", parts[0],parts[1],parts[2],parts[3]);
-		InetAddress addr = InetAddress.getByName(ipaddrStr);
-		
-		
-		int port1 = Integer.parseInt(parts[4]);
-		int port2 = Integer.parseInt(parts[5]);
-		
-		int portnum1 = port1*256;
-		int portnum = portnum1+port2;
-		processor.logDebug(String.format("port calulation %d*256=%d +%d = %d", port1,portnum1,port2, portnum));
-		
-		try	{
-			
-			Socket command = processor.getConnection().getSocket();
-			InetAddress mine = command.getLocalAddress();
-			
-			Socket socket = null;
-            int err = 0;
-            long start = System.currentTimeMillis();
-            int timeout = processor.getServer().getAcceptTimeout();
-            
-            while((System.currentTimeMillis()-start < timeout) && socket == null ) {
-                try {
-                    socket = processor.createSocket(addr,portnum,mine,10);
-                }catch(IOException e){
-                    if(++err<4){
-                        //  Give the client some time
-                        try {
-                            Thread.sleep(200);
-                        } catch (InterruptedException ex) {
-                        }
-                    } else {
-                        // Accept the fact that we are not going to connect.
-                        throw e;
-                    }
-                }                
-            }
-            if( socket == null ) {
-            	throw new SocketTimeoutException("Time out waiting for pasive socket");
-            }
-			processor.setDataSocket(socket);
-			
-			processor.reply(REPLY_200_OK,"port " + portnum + " of " + addr+" Local ="+socket.getLocalAddress()+":"+socket.getLocalPort());
-		}catch(IOException e){            
-			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"can't open data connection e="+e );
-			// Just in case
-			processor.setDataSocket(null);
+		int [] v = new int[6];
+		try {
+			for(int i=0; i < 6; i++ ) {
+				v[i] = Integer.parseInt(parts[i].trim());
+				if( v[i] < 0 || v[i] > 255 ) {
+					throw new NumberFormatException(parts[i]);
+				}
+			}
+		} catch(NumberFormatException e) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Invalid PORT argument "+commandLine);
+			return;
 		}
-		
-        processor.logDebug("Exit port command '"+commandLine+"'");
-	}
-    
+		int port = v[4]*256 + v[5];
+		if( port == 0 ) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Invalid port 0");
+			return;
+		}
+		InetAddress addr = InetAddress.getByAddress(new byte[] {(byte)v[0],(byte)v[1],(byte)v[2],(byte)v[3]});
 
+		// Close any previous passive/active data connection
+		processor.setPasvSocket(null);
+		try	{
+			InetAddress mine = processor.getConnection().getSocket().getLocalAddress();
+			Socket socket = processor.createSocket(addr, port, mine, processor.getConnectTimeout());
+			processor.setDataSocket(socket);
+			processor.reply(REPLY_200_OK,"PORT command successful");
+		}catch(IOException e){
+			processor.setDataSocket(null);
+			processor.logDebug("PORT can't connect to "+addr.getHostAddress()+":"+port, e);
+			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data connection to "+addr.getHostAddress()+":"+port);
+		}
+	}
 }

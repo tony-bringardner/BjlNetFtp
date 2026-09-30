@@ -218,6 +218,93 @@ public class TestTransferReliability {
 		}
 	}
 
+	// ------------------------------------------------------------------ active mode (PORT / EPRT)
+
+	@Test
+	public void portConnectsAndTransfers() throws Exception {
+		byte[] content = "active content".getBytes(StandardCharsets.UTF_8);
+		try (Session s = new Session();
+				java.net.ServerSocket listen = new java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
+			s.put("active.txt", content);
+			int p = listen.getLocalPort();
+			long start = System.currentTimeMillis();
+			s.send("PORT 127,0,0,1," + (p / 256) + "," + (p % 256));
+			s.expect(200);
+			assertTrue(System.currentTimeMillis() - start < 2000, "PORT was slow");
+			assertArrayEquals(content, s.getActive("active.txt", listen));
+		}
+	}
+
+	@Test
+	public void eprtConnectsAndTransfers() throws Exception {
+		byte[] content = "eprt content".getBytes(StandardCharsets.UTF_8);
+		try (Session s = new Session();
+				java.net.ServerSocket listen = new java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
+			s.put("eprt.txt", content);
+			s.send("EPRT |1|127.0.0.1|" + listen.getLocalPort() + "|");
+			s.expect(200);
+			assertArrayEquals(content, s.getActive("eprt.txt", listen));
+		}
+	}
+
+	@Test
+	public void portToClosedPortFailsFast() throws Exception {
+		int closedPort;
+		try (java.net.ServerSocket tmp = new java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"))) {
+			closedPort = tmp.getLocalPort();
+		}
+		try (Session s = new Session()) {
+			long start = System.currentTimeMillis();
+			s.send("PORT 127,0,0,1," + (closedPort / 256) + "," + (closedPort % 256));
+			s.expect(425);
+			assertTrue(System.currentTimeMillis() - start < 2000, "refused connection should fail fast");
+			s.send("NOOP");
+			s.expect(200);
+		}
+	}
+
+	@Test
+	public void badPortArgumentsGet501() throws Exception {
+		try (Session s = new Session()) {
+			String[] bad = { "PORT", "PORT 1,2,3", "PORT 300,0,0,1,1,1", "PORT a,b,c,d,e,f", "PORT 127,0,0,1,0,0",
+					"EPRT", "EPRT |1|not-an-ip|21|", "EPRT |1|127.0.0.1|99999|", "EPRT |1|::1|21|" };
+			for (String cmd : bad) {
+				s.send(cmd);
+				s.expect(501);
+			}
+			s.send("EPRT |3|127.0.0.1|21|");
+			s.expect(522);
+			// exactly one reply per command: the session is still in sync
+			s.send("NOOP");
+			s.expect(200);
+		}
+	}
+
+	// ------------------------------------------------------------------ one reply per command
+
+	@Test
+	public void missingArgumentsGetExactlyOneReply() throws Exception {
+		try (Session s = new Session()) {
+			s.send("USER");
+			s.expect(501);
+			s.send("NOOP");
+			s.expect(200);
+
+			s.send("PASS");
+			s.expect(501);
+			s.send("NOOP");
+			s.expect(200);
+
+			s.send("RNTO nothing.txt");
+			s.expect(503);
+			s.send("NOOP");
+			s.expect(200);
+
+			s.send("SIZE does-not-exist.txt");
+			s.expect(550);
+		}
+	}
+
 	// ------------------------------------------------------------------ PASV / EPSV
 
 	@Test
@@ -502,6 +589,20 @@ public class TestTransferReliability {
 				while ((got = i.read(b)) >= 0) {
 					buf.write(b, 0, got);
 				}
+			}
+			expectComplete();
+			return buf.toByteArray();
+		}
+
+		/** RETR over an active (PORT/EPRT) connection the server has already opened to listen. */
+		byte[] getActive(String name, java.net.ServerSocket listen) throws IOException {
+			listen.setSoTimeout(5000);
+			ByteArrayOutputStream buf = new ByteArrayOutputStream();
+			try (Socket data = listen.accept()) {
+				data.setSoTimeout(10000);
+				send("RETR " + name);
+				expectPreliminary();
+				data.getInputStream().transferTo(buf);
 			}
 			expectComplete();
 			return buf.toByteArray();

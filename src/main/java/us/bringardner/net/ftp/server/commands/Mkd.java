@@ -84,6 +84,10 @@ public class Mkd  extends BaseCommand implements FtpCommand {
 			
 		//  Target will be null is path is illegal
 		FileSource target = processor.createNewFile(commandLine);
+		if( target == null ) {
+			processor.reply(REPLY_550_ACTION_NOT_TAKEN," Invalid name");
+			return;
+		}
 		commandLine = processor.getDisplayFileName(target.toString());
 		
 		if( target.exists()){

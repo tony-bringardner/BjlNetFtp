@@ -85,9 +85,13 @@ public class FtpServer extends Server {
 	/** Default data-connection inactivity timeout (ms) */
 	public static final int DEFAULT_DATA_TIMEOUT = 10 * 60 * 1000;
 	public static final String DATA_TIMEOUT_PROP = FTP_NAME+".dataTimeout";
+	/** Default timeout (ms) for connecting to the client in active mode (PORT/EPRT) */
+	public static final int DEFAULT_CONNECT_TIMEOUT = 15 * 1000;
+	public static final String CONNECT_TIMEOUT_PROP = FTP_NAME+".connectTimeout";
 
 	private volatile int bufferSize = Integer.getInteger(BUFFER_SIZE_PROP, DEFAULT_BUFFER_SIZE);
 	private volatile int dataTimeout = Integer.getInteger(DATA_TIMEOUT_PROP, DEFAULT_DATA_TIMEOUT);
+	private volatile int connectTimeout = Integer.getInteger(CONNECT_TIMEOUT_PROP, DEFAULT_CONNECT_TIMEOUT);
 	private FileSource ftpRoot;
 	//private boolean useJdbc = false;
 	private FileSourceFactory factory = FileSourceFactory.getDefaultFactory();
@@ -350,6 +354,20 @@ public class FtpServer extends Server {
 			throw new IllegalArgumentException("dataTimeout must be > 0");
 		}
 		this.dataTimeout = dataTimeout;
+	}
+
+	/**
+	 * @return timeout (ms) used when connecting to the client for an active (PORT/EPRT) data connection.
+	 */
+	public int getConnectTimeout() {
+		return connectTimeout;
+	}
+
+	public void setConnectTimeout(int connectTimeout) {
+		if( connectTimeout <= 0 ) {
+			throw new IllegalArgumentException("connectTimeout must be > 0");
+		}
+		this.connectTimeout = connectTimeout;
 	}
 
 	public FileSourceFactory getFileSourceFactory() {

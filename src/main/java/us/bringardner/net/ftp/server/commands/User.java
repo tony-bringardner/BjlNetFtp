@@ -81,6 +81,7 @@ public class User  extends NoAuthReqBaseCommand {
 		
 		if(! context.hasNext()) {			
 				processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Not enough parameters");				
+				return;
 		}
 		
 				

@@ -30,16 +30,12 @@
 package us.bringardner.net.ftp.server.commands.rfc2428;
 
 import java.io.IOException;
+import java.net.Inet4Address;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
+import java.util.regex.Pattern;
 
-import javax.net.SocketFactory;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 
-import us.bringardner.core.SecureBaseObject;
 import us.bringardner.net.framework.server.IRequestContext;
 import us.bringardner.net.ftp.server.FtpCommand;
 import us.bringardner.net.ftp.server.FtpRequestProcessor;
@@ -167,92 +163,67 @@ public class Eprt extends BaseCommand implements FtpCommand {
 	 * @see us.bringardner.net.ftp.server.FtpCommand#execute(us.bringardner.net.ftp.server.FtpRequestProcessor, java.lang.String)
 	 */
 	public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
-		processor.setPasvSocket(null);
-
 		String commandLine = context.getCommandLine();
-		processor.logDebug("Enter EPRT command '"+commandLine+"' secure = "+processor.isSecure());
-		String [] args = commandLine.split(" ");
-		if( args.length != 2 || args[1].isEmpty()) {
-			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Not enough parameters");
+		String [] args = commandLine.trim().split(" ");
+		if( args.length != 2 || args[1].length() < 2) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Syntax: EPRT <d><net-prt><d><net-addr><d><tcp-port><d>");
 			return;
 		}
-		
-		try	{
-			//EPRT<space> <d> <net-prt> <d> <net-addr> <d> <tcp-port> <d>
-			char d = args[1].charAt(0);
-			String data = args[1].substring(1);
-			String parts[] = data.split("["+d+"]");
-			if( parts.length != 3) {
-				processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Not enough parts in "+data);
-				return;
-			}
-		
-			int port = Integer.parseInt(parts[2].trim());
 
-			InetAddress addr = InetAddress.getByName(parts[1]);
-			SocketFactory factory = processor.getSocketFactory();
-
-			Socket command = processor.getConnection().getSocket();
-			InetAddress mine = command.getLocalAddress();
-			Socket socket = null;
-			
-			int timeout = processor.getServer().getAcceptTimeout();
-
-			long start = System.currentTimeMillis();
-			while((System.currentTimeMillis()-start < timeout) && socket == null ) {
-				try {
-					socket = createSocket(factory,addr,port,mine,100);
-				}catch(IOException e){
-					//  Give the client some time
-					try {
-						Thread.sleep(10);
-					} catch (InterruptedException ex) {                    
-					}                
-				}
-			}
-			
-			if( socket == null ) {
-				throw new SocketTimeoutException("Timedout waiting for client");
-			}
-			processor.setDataSocket(socket);
-
-			/*
-			 * 		200 ok
-			 *     	5yz Negative Completion
-			 *		x2z Connections
-			 * 		xy2 Extended Port Failure - unknown network protocol
-			 */
-			processor.reply(REPLY_200_OK,"port " + port + " of " + addr+" Local ="+socket.getLocalAddress()+":"+socket.getLocalPort());
-		}catch(IOException e){            
-			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"can't open data connection e="+e );
-			// Just in case
-			processor.setDataSocket(null);
+		// EPRT |1|132.235.1.2|6275|
+		char d = args[1].charAt(0);
+		String data = args[1].substring(1);
+		String parts[] = data.split(Pattern.quote(String.valueOf(d)));
+		if( parts.length != 3) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Syntax: EPRT <d><net-prt><d><net-addr><d><tcp-port><d>");
+			return;
 		}
-
-		processor.logDebug("Exit EPRT command '"+commandLine+"'");
-	}
-
-	private Socket createSocket(SocketFactory factory, InetAddress addr, int port, InetAddress mine, int timeout) throws IOException{
-		if (factory instanceof SSLSocketFactory	) {
-			SSLSocket ret = (SSLSocket) factory.createSocket();
-			// Some clients don't support v1.3 
-			String force = System.getProperty(SecureBaseObject.PROPERTY_FORCE_TLS_VERSION);
-			if( force != null) {
-				force = force.trim();
-				if( !force.isEmpty()) {
-					ret.setEnabledProtocols(new String[] {force});		
-				}
-			}
-			
-			ret.setUseClientMode(false);
-			InetSocketAddress sa = new InetSocketAddress(addr,port);
-			ret.connect(sa, timeout);
-			return ret;
+		String protocol = parts[0].trim();
+		String host = parts[1].trim();
+		boolean ipv4;
+		if( protocol.equals("1") ) {
+			ipv4 = true;
+		} else if( protocol.equals("2")) {
+			ipv4 = false;
 		} else {
-			return factory.createSocket(addr, port);
+			processor.reply(REPLY_522_NETWORK_PROTOCOL_NOT_SUPPORTED,"Network protocol not supported, use (1,2)");
+			return;
 		}
-		
+		// Only accept numeric addresses (never do a DNS lookup on client input)
+		boolean literal = ipv4 ? IPV4.matcher(host).matches() : (host.indexOf(':') >= 0 && host.matches("[0-9A-Fa-f:.%a-zA-Z]+"));
+		int port;
+		try {
+			port = Integer.parseInt(parts[2].trim());
+		} catch (NumberFormatException e) {
+			port = -1;
+		}
+		if( !literal || port < 1 || port > 65535 ) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Invalid EPRT address or port");
+			return;
+		}
+		InetAddress addr = InetAddress.getByName(host);
+		if( ipv4 != (addr instanceof Inet4Address) ) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Address does not match network protocol "+protocol);
+			return;
+		}
+
+		// Close any previous passive/active data connection
+		processor.setPasvSocket(null);
+		try	{
+			InetAddress mine = processor.getConnection().getSocket().getLocalAddress();
+			if( (mine instanceof Inet4Address) != ipv4 ) {
+				// Can't bind the control connection's address for a different protocol
+				mine = null;
+			}
+			Socket socket = processor.createSocket(addr, port, mine, processor.getConnectTimeout());
+			processor.setDataSocket(socket);
+			processor.reply(REPLY_200_OK,"EPRT command successful");
+		}catch(IOException e){
+			processor.setDataSocket(null);
+			processor.logDebug("EPRT can't connect to "+host+":"+port, e);
+			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data connection to "+host+":"+port);
+		}
 	}
 
-
+	private static final Pattern IPV4 = Pattern.compile("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
 }

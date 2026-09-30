@@ -82,6 +82,10 @@ public class Rnto extends BaseCommand implements FtpCommand {
 		
 		FileSource target = processor.getTmpFile();
 		processor.setTmpFile(null);
+		if( target == null ) {
+			processor.reply(REPLY_503_BAD_SEQ_OF_COMMANDS,"RNFR required first");
+			return;
+		}
 		
 		if( target.renameTo(newFile) ) {	
 			processor.reply(REPLY_250_FILE_ACTION_OK,"Requested file action okay, completed");

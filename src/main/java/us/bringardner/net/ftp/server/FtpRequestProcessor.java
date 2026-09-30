@@ -47,7 +47,6 @@ import java.util.Map;
 import javax.net.ServerSocketFactory;
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 
 import us.bringardner.core.ILogger;
 import us.bringardner.core.util.ThreadSafeDateFormat;
@@ -876,23 +875,51 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		}
 	}
 
+	/**
+	 * Open an active mode (PORT/EPRT) data connection to the client.
+	 * 
+	 * @param addr client address
+	 * @param port client port
+	 * @param mine local address to bind (the control connection's local address), may be null
+	 * @param timeout connect timeout in milliseconds
+	 */
 	public Socket createSocket(InetAddress addr, int port, InetAddress mine, int timeout) throws IOException{
 
 		SocketFactory factory = getSocketFactory(); 
-		//In FTP a socket connecting to a remote system is still a server for SSL/TLS
-
-		if (factory instanceof SSLSocketFactory	) {
-			SSLSocket ret = (SSLSocket) factory.createSocket();
-			ret.setUseClientMode(false);
-			InetSocketAddress sa = new InetSocketAddress(addr,port);
-			ret.connect(sa, timeout);
-			System.err.println("switch mode in processor");
+		// Create unconnected so we can apply a connect timeout.
+		// (Previously the timeout was passed as the LOCAL PORT argument of
+		// createSocket(addr, port, localAddr, localPort), which tried to bind port 10.)
+		Socket ret = factory.createSocket();
+		try {
+			if (ret instanceof SSLSocket	) {
+				SSLSocket ssl = (SSLSocket) ret;
+				//In FTP a socket connecting to a remote system is still a server for SSL/TLS
+				ssl.setUseClientMode(false);
+				String force = System.getProperty(us.bringardner.core.SecureBaseObject.PROPERTY_FORCE_TLS_VERSION);
+				if( force != null && !force.trim().isEmpty()) {
+					ssl.setEnabledProtocols(new String[] {force.trim()});
+				}
+			}
+			if( mine != null ) {
+				ret.bind(new InetSocketAddress(mine, 0));
+			}
+			ret.connect(new InetSocketAddress(addr,port), timeout);
+			ret.setSoTimeout(getActivityTimeOut());
 			return ret;
-		} else {
-			System.err.println("not secure in processor");
-			return factory.createSocket(addr, port, mine, timeout);
+		} catch (IOException e) {
+			try {
+				ret.close();
+			} catch (IOException e1) {
+			}
+			throw e;
 		}
+	}
 
+	/**
+	 * @return the timeout (ms) for opening an active mode data connection.
+	 */
+	public int getConnectTimeout() {
+		return ((FtpServer)getServer()).getConnectTimeout();
 	}
 
 
