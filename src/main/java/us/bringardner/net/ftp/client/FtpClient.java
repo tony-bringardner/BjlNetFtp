@@ -865,7 +865,12 @@ public class FtpClient extends SecureBaseObject implements FTP {
 
 				if( res.isPositiveIntermediate()) {
 					res = sendCommand(PASS+" "+passwd);
-					if(res._getResponseCode() == REPLY_332_NEED_ACCOUNT) {
+					// 332 asks for an account (RFC 959). A server may also answer 530 and
+					// accept the account in a following ACCT, as the BJL server does
+					// (user@account logins), so a configured account is tried once either way.
+					int code = res._getResponseCode();
+					if( account != null && !account.isEmpty()
+							&& (code == REPLY_332_NEED_ACCOUNT || code == REPLY_530_USER_NOT_LOGGED_IN)) {
 						res = sendCommand(ACCT+" "+account);
 					}
 				}

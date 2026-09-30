@@ -83,17 +83,21 @@ public class Pass extends NoAuthReqBaseCommand {
 				if(  processor.authenticate(pw) ){
 					processor.reply(REPLY_230_USER_LOGGED_IN,"password ok");
 				} else {
-					//  The password was not accepted so I'll assume account info is required
+					// RFC 959: 530 Not logged in. (It was 332 "need account", which says the
+					// password was accepted and only an account is missing; the server can't
+					// know that.) The password is kept for one ACCT, which the RFC allows at
+					// any time and which retries the login as user@account (BJL-4).
 					processor.setTempValue(PASS, pw);
 					processor.loginFailedDelay();
-					processor.reply(REPLY_332_NEED_ACCOUNT,"user not logged in, try adding account");
+					processor.reply(REPLY_530_USER_NOT_LOGGED_IN,"Login incorrect");
                     if( processor.incLoginAttempts() > 3 ) {
                         processor.stop();
                     }
 				}
 			} catch(Exception ex) {
-				//  May throw security 
-				processor.reply(REPLY_530_USER_NOT_LOGGED_IN,"not logged in err="+ex);
+				//  May throw security; the details are logged, not sent to the client
+				processor.logError("Login failed", ex);
+				processor.reply(REPLY_530_USER_NOT_LOGGED_IN,"Login incorrect");
 			}
 	}
 }

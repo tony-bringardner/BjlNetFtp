@@ -303,7 +303,7 @@ public class TestSecurity {
 			out.flush();
 			String reply = in.readLine();
 			long elapsed = System.currentTimeMillis() - start;
-			assertTrue(reply.startsWith("332") || reply.startsWith("530"), "failed login: " + reply);
+			assertTrue(reply.startsWith("530"), "failed login: " + reply);
 			assertTrue(elapsed >= 350, "failed login replied after only " + elapsed + "ms");
 		} finally {
 			server.setLoginFailureDelay(old);
