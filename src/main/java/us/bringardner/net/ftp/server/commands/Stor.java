@@ -30,7 +30,6 @@
 package us.bringardner.net.ftp.server.commands;
 
 import java.io.IOException;
-import java.io.OutputStream;
 
 import us.bringardner.io.filesource.FileSource;
 import us.bringardner.net.framework.server.IPermission;
@@ -91,30 +90,28 @@ public class Stor  extends BaseCommand implements FtpCommand {
 			
 		
 		FileSource target = processor.createNewFile(commandLine);
-		
-		processor.logDebug(getName()+" target = "+target.getAbsolutePath());
-		if( target.isDirectory()){
+		if( target == null || target.isDirectory()){
 			processor.reply(REPLY_450_FILE_ACTION_FAILED," Invalid or non existant name");
 			return;
 		} 
-		
+		processor.logDebug(getName()+" target = "+target.getAbsolutePath());
 
-		//  Check for a restart
 		Long rest = (Long)processor.removeTempValue(REST);
-		if( rest != null ){
-			//  This is a restart but must be restarting at the end of the fiel
-			//  Equivalent to append
-			if( target.length() != rest.longValue()) {
-				processor.reply(REPLY_450_FILE_ACTION_FAILED," Resart marker "+rest+" is past the EOF ="+(target.length()));
+		// REST 0 means "no restart" (RFC 3659)
+		boolean resume = rest != null && rest.longValue() > 0;
+		if( resume ){
+			long len = target.exists() ? target.length() : 0;
+			if( len != rest.longValue()) {
+				processor.reply(REPLY_450_FILE_ACTION_FAILED," Restart marker "+rest+" does not match the file size ("+len+")");
 				return;
 			}
 		}
-
-		//  Accept the file.  If rest != null then we append
-		//boolean append = (rest!=null);
-		OutputStream out = target.getOutputStream(rest != null);
-		
-		processor.receiveStream(out);
+		/*
+		 * receiveFile gets the data connection before touching the file and, unless
+		 * this is a restart, writes to a temporary file that replaces the target only
+		 * when the whole upload has been received.
+		 */
+		processor.receiveFile(target, resume);
 
 	}
 	

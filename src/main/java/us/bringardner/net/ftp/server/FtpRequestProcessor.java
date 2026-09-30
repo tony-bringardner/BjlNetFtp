@@ -80,31 +80,48 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 
 		// Abort the transfer (ABOR)
 		public synchronized void abort() throws IOException {
-			synchronized (stream.lock) {
-				if( !stream.isRunning()) {
-					reply(us.bringardner.net.ftp.FTP.REPLY_226_CLOSING_DATA_CON,"01 abort ok");
+			FtpServerStream current = stream;
+			synchronized (current.lock) {
+				if( !current.isActive()) {
+					reply(us.bringardner.net.ftp.FTP.REPLY_226_CLOSING_DATA_CON,"No transfer in progress. ABOR command successful");
 				} else {
-					stream.abort();
+					// The transfer thread sends 426 followed by 226
+					current.abort();
 				}
 			}
-
 		}
 
+		/**
+		 * @return true if a data transfer has been started and has not sent its final reply.
+		 */
+		public synchronized boolean isTransferInProgress() {
+			return stream.isActive();
+		}
 
-		public synchronized void start(FtpServerStream stream2) throws IOException {
-			synchronized (stream.lock) {
-				if(stream.isRunning()) {
-					stream.processor.reply(REPLY_425_CANT_OPEN_DATA_CON, "Data transfer already in process");
-				} else {
-					stream = stream2;
-					stream.start();
-					reply(REPLY_125_DATA_CON_ALREADY_OPEN,"Starting "+(stream.processor.isAsciiMode() ? "Ascii":"Binary")+" transfer");
-				}	
+		/**
+		 * Send the preliminary reply and start the transfer.
+		 * <p>
+		 * The 150 reply MUST be sent before the transfer thread is started. Otherwise a small
+		 * transfer can complete, and send its 226, before the 150 is written, and the client
+		 * sees the replies out of order.
+		 * 
+		 * @return true if the transfer was started, false if it was refused (a 425 has been sent).
+		 */
+		public synchronized boolean start(FtpServerStream next, String message) throws IOException {
+			if(stream.isActive()) {
+				next.discard();
+				reply(REPLY_425_CANT_OPEN_DATA_CON, "Data transfer already in process");
+				return false;
 			}
-
+			reply(REPLY_150_FILE_STATUS_OK, message);
+			stream = next;
+			next.start();
+			return true;
 		}
 
-
+		public boolean start(FtpServerStream next) throws IOException {
+			return start(next, "Opening "+(next.processor.isAsciiMode() ? "ASCII":"BINARY")+" mode data connection");
+		}
 	}
 	/* 
 	 * This is used to temporarily store vales that are provided in
@@ -308,6 +325,13 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			ret = pasvSocket.getDataSocket();
 		} else {
 			ret = dataSocket;
+		}
+
+		if( ret != null && ret.isClosed() ) {
+			// A data connection is used for one transfer only. If the previous transfer
+			// closed it, the client must send a new PASV/PORT first.
+			logDebug("Data socket is already closed");
+			ret = null;
 		}
 
 		if( ret != null ){
@@ -522,16 +546,20 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 	public void transferStream(InputStream in, OutputStream out, Socket sock) throws IOException{
+		transferStream(in, out, sock, false, null);
+	}
 
-		/*
-		 * Start the transfer process then the go back and listen for commands.
-		 * The TransferController will manage the reply.
-		 * This give the client a chance to send ABOR command.
-		 */
-
-		FtpServerStream s = new FtpServerStream(this, in, out,sock);
+	/**
+	 * Start the transfer process then the go back and listen for commands.
+	 * The transfer thread sends the final reply.
+	 * This give the client a chance to send ABOR command.
+	 * 
+	 * @param upload true if data flows from the socket to local storage (STOR/APPE)
+	 * @param handler optional callback run after the copy completes (may be null)
+	 */
+	public void transferStream(InputStream in, OutputStream out, Socket sock, boolean upload, FtpServerStream.CompletionHandler handler) throws IOException{
+		FtpServerStream s = new FtpServerStream(this, in, out, sock, upload, handler);
 		transferInProcess.start(s);
-
 	}
 
 	void setLinger(Socket sock) throws SocketException {
@@ -565,30 +593,46 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			return;
 		}
 
-		Socket sock = getDataSocket();
+		boolean started = false;
+		try {
+			Socket sock = getDataSocket();
 
-		if( sock == null ){
-			reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data socket");
-			return;
-		} 
+			if( sock == null ){
+				reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data socket");
+				return;
+			} 
 
-		OutputStream out = sock.getOutputStream();
-
-		//  Check for a restart
-		long skipped =0l;
-		Long rest = (Long)removeTempValue(REST);
-		if( rest != null ){
-			long nb = rest.longValue();
-			skipped = in.skip(nb); 
-			logDebug("REST ="+rest+" skipped ="+skipped);
-			if(skipped != nb) {
-				reply(REPLY_450_FILE_ACTION_FAILED,"Can't skip "+nb+" bytes.  Skipped = "+skipped);
+			OutputStream out;
+			try {
+				out = sock.getOutputStream();
+			} catch (IOException e) {
+				reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data connection: "+e.getMessage());
 				return;
 			}
+
+			//  Check for a restart
+			long skipped =0l;
+			Long rest = (Long)removeTempValue(REST);
+			if( rest != null ){
+				long nb = rest.longValue();
+				skipped = in.skip(nb); 
+				logDebug("REST ="+rest+" skipped ="+skipped);
+				if(skipped != nb) {
+					reply(REPLY_450_FILE_ACTION_FAILED,"Can't skip "+nb+" bytes.  Skipped = "+skipped);
+					return;
+				}
+			}
+			transferStream(in, out, sock, false, null);
+			// From here on the transfer (or StreamController on refusal) owns the stream
+			started = true;
+		} finally {
+			if( !started ) {
+				try {
+					in.close();
+				} catch (IOException e) {
+				}
+			}
 		}
-		transferStream(in, out, sock);
-
-
 	}
 
 	public int getLinger() {
@@ -617,11 +661,128 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		Socket sock = getDataSocket();
 
 		if( sock == null ){
+			try {
+				out.close();
+			} catch (IOException e) {
+			}
 			reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data socket");
 		} else {
-			InputStream in = sock.getInputStream();
-			transferStream(in, out, sock);
+			InputStream in;
+			try {
+				in = sock.getInputStream();
+			} catch (IOException e) {
+				try {
+					out.close();
+				} catch (IOException e1) {
+				}
+				reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data connection: "+e.getMessage());
+				return;
+			}
+			transferStream(in, out, sock, true, null);
 		}
+	}
+
+	/** Suffix used for the temporary file that receives a STOR upload. */
+	public static final String UPLOAD_TEMP_SUFFIX = ".ftp-part";
+	/** Suffix used for the previous version of a file while an upload is moved into place. */
+	public static final String UPLOAD_BACKUP_SUFFIX = ".ftp-old";
+
+	/**
+	 * Receive a file (STOR/APPE) without putting the existing file at risk.
+	 * <ol>
+	 * <li>The data connection is obtained <b>before</b> anything is opened, so a STOR with no
+	 * data connection gets a 425 and leaves the file untouched.</li>
+	 * <li>When {@code append} is false the data is written to a hidden temporary file in the
+	 * same directory and renamed over the target only after the whole upload has arrived.
+	 * An aborted, timed out or failed upload leaves the original untouched and the temporary
+	 * file is deleted.</li>
+	 * <li>When {@code append} is true (APPE, or STOR after REST) data is appended in place,
+	 * which is what a resumed upload needs.</li>
+	 * </ol>
+	 * @param target file to create or replace
+	 * @param append true to append to the target in place
+	 */
+	public void receiveFile(final FileSource target, boolean append) throws IOException {
+		Socket sock = getDataSocket();
+		if( sock == null ){
+			reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data socket");
+			return;
+		}
+
+		InputStream in;
+		try {
+			in = sock.getInputStream();
+		} catch (IOException e) {
+			reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data connection: "+e.getMessage());
+			return;
+		}
+
+		OutputStream out = null;
+		FtpServerStream.CompletionHandler handler = null;
+		try {
+			if( append ) {
+				out = target.getOutputStream(true);
+			} else {
+				final FileSource temp = siblingOf(target, UPLOAD_TEMP_SUFFIX);
+				out = temp.getOutputStream(false);
+				handler = new FtpServerStream.CompletionHandler() {
+					@Override
+					public void transferComplete(boolean success) throws IOException {
+						if( success ) {
+							commitUpload(temp, target);
+						} else if( temp.exists() && !temp.delete() ) {
+							logError("Can't delete incomplete upload "+temp);
+						}
+					}
+				};
+			}
+		} catch (Exception e) {
+			logError("Can't open "+target+" for writing", e);
+			try {
+				sock.close();
+			} catch (IOException e1) {
+			}
+			reply(REPLY_553_FILE_NAME_NOT_ALLOWED,"Can't write "+getDisplayFileName(target.getName())+": "+e.getMessage());
+			return;
+		}
+
+		transferStream(in, out, sock, true, handler);
+	}
+
+	/**
+	 * Move a completed upload into place, replacing target.
+	 */
+	void commitUpload(FileSource temp, FileSource target) throws IOException {
+		// On POSIX file systems this atomically replaces the target.
+		if( temp.renameTo(target) ) {
+			return;
+		}
+		// Some file systems (Windows, some FileSource implementations) won't rename over an
+		// existing file. Move the old one aside first so it can be restored on failure.
+		FileSource backup = null;
+		if( target.exists() ) {
+			backup = siblingOf(target, UPLOAD_BACKUP_SUFFIX);
+			if( !target.renameTo(backup) ) {
+				temp.delete();
+				throw new IOException("Can't replace "+target.getName());
+			}
+		}
+		if( !temp.renameTo(target) ) {
+			if( backup != null ) {
+				backup.renameTo(target);
+			}
+			temp.delete();
+			throw new IOException("Can't move upload into place for "+target.getName());
+		}
+		if( backup != null && !backup.delete() ) {
+			logError("Can't delete backup "+backup);
+		}
+	}
+
+	private static FileSource siblingOf(FileSource target, String suffix) throws IOException {
+		FileSource dir = target.getParentFile();
+		String name = "."+target.getName()+"."+Long.toHexString(System.nanoTime())+suffix;
+		return dir.getChild(name);
 	}
 
 	public boolean isImageMode() {

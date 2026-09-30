@@ -79,6 +79,15 @@ public class FtpServer extends Server {
 	public static final String PASIVE_CONTROL_MIN_PROP = FTP_NAME+".minControlPort";
 	public static final String PASIVE_CONTROL_MAX_PROP = FTP_NAME+".maxControlPort";
 	
+	/** Default size (bytes) of the buffer used to copy data-channel transfers. */
+	public static final int DEFAULT_BUFFER_SIZE = 64 * 1024;
+	public static final String BUFFER_SIZE_PROP = FTP_NAME+".bufferSize";
+	/** Default data-connection inactivity timeout (ms) */
+	public static final int DEFAULT_DATA_TIMEOUT = 10 * 60 * 1000;
+	public static final String DATA_TIMEOUT_PROP = FTP_NAME+".dataTimeout";
+
+	private volatile int bufferSize = Integer.getInteger(BUFFER_SIZE_PROP, DEFAULT_BUFFER_SIZE);
+	private volatile int dataTimeout = Integer.getInteger(DATA_TIMEOUT_PROP, DEFAULT_DATA_TIMEOUT);
 	private FileSource ftpRoot;
 	//private boolean useJdbc = false;
 	private FileSourceFactory factory = FileSourceFactory.getDefaultFactory();
@@ -185,6 +194,7 @@ public class FtpServer extends Server {
 			public IProcessor getProcessor() {
 				FtpRequestProcessor ret = new FtpRequestProcessor();
 				ret.getLogger().setLevel(FtpServer.this.getLogger().getLevel());
+				ret.setActivityTimeOut(getDataTimeout());
 				return ret;
 			}			
 		});
@@ -309,6 +319,39 @@ public class FtpServer extends Server {
 		setFileSourceFactory(ftpRoot.getFileSourceFactory());
 	}
 	
+	/**
+	 * @return size (bytes) of the buffer used for data-channel transfers.
+	 */
+	public int getBufferSize() {
+		return bufferSize;
+	}
+
+	public void setBufferSize(int bufferSize) {
+		if( bufferSize <= 0 ) {
+			throw new IllegalArgumentException("bufferSize must be > 0");
+		}
+		this.bufferSize = bufferSize;
+	}
+
+	/**
+	 * @return the data-connection inactivity timeout in milliseconds. A transfer
+	 * that moves no data for this long is aborted with a 426 reply.
+	 */
+	public int getDataTimeout() {
+		return dataTimeout;
+	}
+
+	/**
+	 * Applies to processors (connections) created after this call.
+	 * @param dataTimeout inactivity timeout in milliseconds (must be > 0)
+	 */
+	public void setDataTimeout(int dataTimeout) {
+		if( dataTimeout <= 0 ) {
+			throw new IllegalArgumentException("dataTimeout must be > 0");
+		}
+		this.dataTimeout = dataTimeout;
+	}
+
 	public FileSourceFactory getFileSourceFactory() {
 		return factory;
 	}

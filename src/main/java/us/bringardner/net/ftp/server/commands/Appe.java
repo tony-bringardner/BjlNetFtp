@@ -30,7 +30,6 @@
 package us.bringardner.net.ftp.server.commands;
 
 import java.io.IOException;
-import java.io.OutputStream;
 
 import us.bringardner.io.filesource.FileSource;
 import us.bringardner.net.framework.server.IPermission;
@@ -91,8 +90,8 @@ public class Appe  extends BaseCommand implements FtpCommand {
 		} 
 
 		
-		OutputStream out = target.getOutputStream(true);
-		processor.receiveStream(out);
+		// Get the data connection before opening the file
+		processor.receiveFile(target, true);
 
 	}
 
