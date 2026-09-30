@@ -27,6 +27,7 @@ package us.bringardner.net.ftp.test;
 
 
 
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -69,6 +70,9 @@ import us.bringardner.net.ftp.client.ClientFtpResponse;
 import us.bringardner.net.ftp.client.FtpClient;
 import us.bringardner.net.ftp.server.FtpRequestProcessor;
 import us.bringardner.net.ftp.server.FtpServer;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.KeyStore;
 
 
 @TestMethodOrder(OrderAnnotation.class)
@@ -114,28 +118,81 @@ public abstract class TestFtpBaseTestClass {
 
 	}; 
 
-	public static void excuteOsCommand(String filePath) throws IOException{
-		boolean isWindows = System.getProperty("os.name").toLowerCase().indexOf("windows") >= 0;
-		Process p = null;
-		if(isWindows){
-			p = Runtime.getRuntime().exec("cmd /c start " + filePath);	        
-		}else {
-			p = Runtime.getRuntime().exec(new String[] {filePath}, null);
-			//p = Runtime.getRuntime().exec(new String[] {"/bin/sh", "-c", filePath}, null);
-		}
-		try {
-			p.waitFor(10, TimeUnit.SECONDS);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-		int exit = p.exitValue();
-		assertEquals(0,exit,"Invalid exit code");
-		String expect = "Generating 2,048 bit RSA key pair and self-signed certificate (SHA256withRSA) with a validity of 90 days\n"
-				+ "	for: CN=bringardner.us, OU=AA, O=BBB, L=Bringardner, ST=CCCC, C=DD";
-		String tmp = new String(p.getInputStream().readAllBytes())+new String(p.getErrorStream().readAllBytes());
-		
-		assertEquals(expect.trim(),tmp.trim(),"Invalid response text ");
+	public static final String TEST_KEYSTORE = "target/serverkeystore.p12";
+	public static final String TEST_KEYSTORE_PASSWORD = "peekab00";
+	public static final String TEST_KEY_ALIAS = "serverkey";
 
+	/**
+	 * Makes the self-signed test keystore with the running JDK's keytool unless a usable
+	 * one is already there: it must load and hold the key, with a certificate that is still
+	 * valid tomorrow (BJL-7). The result is checked by loading it; keytool's messages differ
+	 * between JDKs, so comparing them failed the first test class on some JDKs.
+	 * makecert.sh does the same by hand.
+	 */
+	public static synchronized void makeTestKeystore(File file) throws IOException {
+		if( isUsableKeystore(file)) {
+			return;
+		}
+		Files.deleteIfExists(file.toPath());
+		File dir = file.getAbsoluteFile().getParentFile();
+		if( dir != null ) {
+			dir.mkdirs();
+		}
+		boolean windows = System.getProperty("os.name").toLowerCase().contains("windows");
+		String keytool = Paths.get(System.getProperty("java.home"), "bin", windows ? "keytool.exe" : "keytool").toString();
+		File log = File.createTempFile("keytool", ".log");
+		try {
+			// no shell: arguments are passed as they are, on every OS
+			Process p = new ProcessBuilder(keytool, "-genkeypair", "-noprompt",
+					"-alias", TEST_KEY_ALIAS,
+					"-dname", "CN=bringardner.us, OU=AA, O=BBB, L=Bringardner, ST=CCCC, C=DD",
+					"-keystore", file.getPath(), "-storetype", "PKCS12",
+					"-storepass", TEST_KEYSTORE_PASSWORD, "-keypass", TEST_KEYSTORE_PASSWORD,
+					"-keyalg", "RSA", "-keysize", "2048", "-sigalg", "SHA256withRSA",
+					"-validity", "3650")
+					.redirectErrorStream(true)
+					.redirectOutput(log)
+					.start();
+			boolean done;
+			try {
+				done = p.waitFor(60, TimeUnit.SECONDS);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new IOException("Interrupted while making the test keystore", e);
+			}
+			String output = new String(Files.readAllBytes(log.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+			if( !done ) {
+				p.destroyForcibly();
+				fail("keytool didn't finish: "+output);
+			}
+			assertEquals(0, p.exitValue(), "keytool failed: "+output);
+			assertTrue(isUsableKeystore(file), "keytool didn't make a usable keystore: "+output);
+		} finally {
+			log.delete();
+		}
+	}
+
+	/** Loads, holds the key, and its certificate is valid for at least another day. */
+	public static boolean isUsableKeystore(File file) {
+		if( !file.isFile()) {
+			return false;
+		}
+		try(InputStream in = new java.io.FileInputStream(file)) {
+			KeyStore ks = KeyStore.getInstance("PKCS12");
+			ks.load(in, TEST_KEYSTORE_PASSWORD.toCharArray());
+			if( !ks.isKeyEntry(TEST_KEY_ALIAS)) {
+				return false;
+			}
+			java.security.cert.Certificate cert = ks.getCertificate(TEST_KEY_ALIAS);
+			if( !(cert instanceof X509Certificate)) {
+				return false;
+			}
+			((X509Certificate) cert).checkValidity(new java.util.Date(System.currentTimeMillis()+TimeUnit.DAYS.toMillis(1)));
+			return true;
+		} catch (Exception e) {
+			// unreadable, wrong password, expired...: make a new one
+			return false;
+		}
 	}
 
 	public static  FtpClient getFtpClient() throws IOException {
@@ -218,10 +275,7 @@ public abstract class TestFtpBaseTestClass {
 		System.setProperty("FtpServer.Protocol", "TLSv1.3");
 		System.setProperty("us.bringardner.net.ftp.client.FtpClient.Protocol", "TLSv1.3");
 
-		File file = new File("target/serverkeystore.p12");
-		if( !file.exists()) {
-			excuteOsCommand("./makecert.sh");
-		}
+		makeTestKeystore(new File(TEST_KEYSTORE));
 		
 		// start an FTP server 
 		try {

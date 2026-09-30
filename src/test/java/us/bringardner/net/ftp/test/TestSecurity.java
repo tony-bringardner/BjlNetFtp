@@ -255,7 +255,7 @@ public class TestSecurity {
 	@Test
 	public void authMechanismIsCaseInsensitive() throws Exception {
 		File keystore = new File("target/serverkeystore.p12");
-		Assumptions.assumeTrue(keystore.exists(), "no test keystore (run ./makecert.sh)");
+		TestFtpBaseTestClass.makeTestKeystore(keystore);
 		System.setProperty("FtpServer.KeyStoreName", keystore.getPath());
 		System.setProperty("FtpServer.KeyStorePassword", "peekab00");
 		System.setProperty("FtpServer.KeyStoreType", "PKCS12");

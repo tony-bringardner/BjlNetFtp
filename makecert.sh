@@ -10,4 +10,5 @@ keytool -genkey -noprompt \
  -keypass peekab00 \
  -keyalg RSA \
  -keysize 2048 \
- -sigalg SHA256withRSA
+ -sigalg SHA256withRSA \
+ -validity 3650

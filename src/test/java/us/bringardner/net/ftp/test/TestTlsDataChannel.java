@@ -25,7 +25,6 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.TrustManager;
 
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -52,7 +51,7 @@ public class TestTlsDataChannel {
 	@BeforeAll
 	public static void start() throws Exception {
 		File keystore = new File("target/serverkeystore.p12");
-		Assumptions.assumeTrue(keystore.exists(), "no test keystore (run ./makecert.sh)");
+		TestFtpBaseTestClass.makeTestKeystore(keystore);
 		System.setProperty("FtpServer.KeyStoreName", keystore.getPath());
 		System.setProperty("FtpServer.KeyStorePassword", "peekab00");
 		System.setProperty("FtpServer.KeyStoreType", "PKCS12");
