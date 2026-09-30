@@ -43,6 +43,7 @@ public class ClientFtpInputStream extends InputStream implements FTP {
     private String path;
     private InputStream in ;
     private boolean eof = false;
+    private boolean closed = false;
     private ClientDataTransferProcess dtp ;
     private boolean ascii;
     private long startAt;
@@ -52,7 +53,7 @@ public class ClientFtpInputStream extends InputStream implements FTP {
     }
 
     public ClientFtpInputStream(String path, FtpClient client, boolean ascii) throws IOException {
-        this(path,client,false,0l);
+        this(path,client,ascii,0l); // was always false, so ASCII was ignored
     }
 
     public ClientFtpInputStream(String path, FtpClient client, boolean ascii, long startingPos) throws IOException {
@@ -109,26 +110,20 @@ public class ClientFtpInputStream extends InputStream implements FTP {
         client.logError(getClass().getName()+" : "+msg);   
     }
 
-    private void completeDownload() throws IOException {
+    /**
+     * Close the data connection and read the server's final reply.
+     * @return the final reply
+     */
+    private ClientFtpResponse completeDownload() throws IOException {
         dtp.close();
-        
-        
         try {
-            ClientFtpResponse res = client.readResponse();
-            if( !res.isPositiveComplet()) {
-                throw new IOException("Error completing transfer.  response = "+res);
-            }
-
+            return client.readResponse();
         } catch(SocketTimeoutException ex) {
-            try {
-                String tmp = client.executePwd();
-                System.out.println("tmp = "+tmp);
-            } catch(Exception e) {
-                System.out.println("Error "+e);
-                e.printStackTrace();
-            }
-        } 
-        
+            // We don't know where the control connection is in the conversation any more;
+            // drop it so the next command reconnects instead of reading the wrong reply.
+            client.abandonConnection();
+            throw new IOException("Timed out waiting for the server to confirm the download of "+path, ex);
+        }
     }
 
     public int available() throws IOException {
@@ -170,15 +165,25 @@ public class ClientFtpInputStream extends InputStream implements FTP {
     }
 
 
+    /**
+     * Close the download. If the whole stream was read (EOF) and the server reports that the
+     * transfer failed (e.g. 426), an IOException is thrown because the data is incomplete.
+     * Closing before EOF abandons the transfer, so a negative reply is expected and ignored.
+     * Calling close more than once has no effect.
+     */
     public void close() throws IOException {
-        super.close();
+        if( closed ) {
+            return;
+        }
+        closed = true;
         try {
-        	completeDownload();	
-		} catch (Exception e) {
-			client.logDebug(getClass().getName()+" : Error closing "+e);   
-		}
-        
-        client.streamHasClosed(path, this);
+            ClientFtpResponse res = completeDownload();
+            if( eof && !res.isPositiveComplet() ) {
+                throw new IOException("Download of "+path+" failed: "+res);
+            }
+        } finally {
+            client.streamHasClosed(path, this);
+        }
     }
 
 

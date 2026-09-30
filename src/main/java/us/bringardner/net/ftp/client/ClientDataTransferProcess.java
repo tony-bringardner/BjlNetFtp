@@ -305,10 +305,11 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 		short p2 = (short)(port-(p1*256));
 
 
-		return    ip[0]+","+
-		ip[1]+","+
-		ip[2]+","+
-		ip[3]+","+
+		// & 0xff: bytes are signed, so octets over 127 came out negative
+		return    (ip[0]&0xff)+","+
+		(ip[1]&0xff)+","+
+		(ip[2]&0xff)+","+
+		(ip[3]&0xff)+","+
 		p1+","+
 		p2;
 

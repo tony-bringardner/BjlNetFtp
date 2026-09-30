@@ -668,7 +668,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			Long rest = (Long)removeTempValue(REST);
 			if( rest != null ){
 				long nb = rest.longValue();
-				skipped = in.skip(nb); 
+				skipped = skipFully(in, nb); 
 				logDebug("REST ="+rest+" skipped ="+skipped);
 				if(skipped != nb) {
 					reply(REPLY_450_FILE_ACTION_FAILED,"Can't skip "+nb+" bytes.  Skipped = "+skipped);
@@ -686,6 +686,28 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 				}
 			}
 		}
+	}
+
+	/**
+	 * InputStream.skip() may legitimately skip fewer bytes than requested,
+	 * so keep skipping until done or end of stream.
+	 * @return number of bytes actually skipped
+	 */
+	public static long skipFully(InputStream in, long n) throws IOException {
+		long total = 0;
+		while( total < n ) {
+			long s = in.skip(n - total);
+			if( s > 0 ) {
+				total += s;
+			} else {
+				// skip() returned 0: check for end of stream
+				if( in.read() < 0 ) {
+					break;
+				}
+				total++;
+			}
+		}
+		return total;
 	}
 
 	public int getLinger() {
@@ -1042,6 +1064,20 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 
 	public long getLastActivity() {
 		return lastActivity;
+	}
+
+	/**
+	 * Wait before replying to a failed login (see {@link FtpServer#setLoginFailureDelay(int)}).
+	 */
+	public void loginFailedDelay() {
+		int delay = ((FtpServer)getServer()).getLoginFailureDelay();
+		if( delay > 0 ) {
+			try {
+				Thread.sleep(delay);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+		}
 	}
 
 	public int incLoginAttempts() {

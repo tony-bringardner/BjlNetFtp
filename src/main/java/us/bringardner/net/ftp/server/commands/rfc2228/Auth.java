@@ -115,7 +115,14 @@ public class Auth extends NoAuthReqBaseCommand {
 			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM," Wrong number of parameters.  Expected 1, got "+(args.length-1));
 			return;
 		}
-		String mech = args[1];
+		// RFC 2228: the mechanism name is case-insensitive. TLS-C and TLS-P are
+		// historical names (draft-murray-auth-ftp-ssl) still sent by some clients.
+		String mech = args[1].trim().toUpperCase(java.util.Locale.ROOT);
+		if( mech.equals("TLS-C") ) {
+			mech = "TLS";
+		} else if( mech.equals("TLS-P") ) {
+			mech = "SSL";
+		}
 		if( !(mech.equals("SSL") || mech.equals("TLS") ) ){
 			processor.reply(REPLY_504_NOT_IMP_FOR_PARAM," Unsupported secutity mechanizm, "+mech);
 			return;

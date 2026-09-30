@@ -76,12 +76,16 @@ public class Pass extends NoAuthReqBaseCommand {
 		
 			
 			try {
-				String pw = context.getNextToken();
+				// The password is everything after "PASS " (it may contain spaces)
+				String line = context.getCommandLine();
+				int idx = line.indexOf(' ');
+				String pw = idx < 0 ? "" : line.substring(idx+1);
 				if(  processor.authenticate(pw) ){
 					processor.reply(REPLY_230_USER_LOGGED_IN,"password ok");
 				} else {
 					//  The password was not accepted so I'll assume account info is required
 					processor.setTempValue(PASS, pw);
+					processor.loginFailedDelay();
 					processor.reply(REPLY_332_NEED_ACCOUNT,"user not logged in, try adding account");
                     if( processor.incLoginAttempts() > 3 ) {
                         processor.stop();

@@ -514,6 +514,10 @@ public class TestTransferReliability {
 			expect(200);
 		}
 
+		Socket socket() {
+			return control;
+		}
+
 		void send(String cmd) throws IOException {
 			out.write(cmd + "\r\n");
 			out.flush();

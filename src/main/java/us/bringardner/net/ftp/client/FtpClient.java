@@ -99,7 +99,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private int port = FTP_PORT;
 	private boolean useSsl;
 	private volatile Socket socket;
-	private SSLSocket sslSocket;
+	private volatile SSLSocket sslSocket;
 	public StringBuilder dialog = new StringBuilder();
 	private volatile CRLFLineReader input;
 	private volatile CRLFLineWriter output;
@@ -586,6 +586,27 @@ public class FtpClient extends SecureBaseObject implements FTP {
 		}
 		appendDialog(" Read: "+ret);
 		return ret;
+	}
+
+	/**
+	 * Drop the control connection without sending QUIT. Used when the conversation with
+	 * the server is out of step (e.g. a reply timed out); the next command reconnects.
+	 */
+	synchronized void abandonConnection() {
+		Socket s = socket;
+		socket = null;
+		sslSocket = null;
+		input = null;
+		output = null;
+		connected = false;
+		mlstTested = false;
+		featResponse = null;
+		if( s != null ) {
+			try {
+				s.close();
+			} catch (IOException e) {
+			}
+		}
 	}
 
 	/**

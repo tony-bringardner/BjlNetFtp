@@ -83,9 +83,20 @@ public class ClientFtpResponse implements FTP {
         String line = ftpClient.readLine(); 
         int idx = 3;
         
-        if( line != null && line.length() >= idx) {
+        if( line == null ) {
+            // Leave the 421 default: the server closed the control connection
+            return;
+        }
+        if( line.length() < idx ) {
+            throw new IOException("Invalid FTP reply: '"+line+"'");
+        }
+        {
             String tmp = line.substring(0,idx);
-            responseCode = Integer.parseInt(tmp);
+            try {
+                responseCode = Integer.parseInt(tmp);
+            } catch (NumberFormatException e) {
+                throw new IOException("Invalid FTP reply: '"+line+"'", e);
+            }
             
            
             line = line.substring(idx);

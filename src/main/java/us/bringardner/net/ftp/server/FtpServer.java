@@ -93,11 +93,15 @@ public class FtpServer extends Server {
 	 * address (needed for FXP / server-to-server transfers). Default false (RFC 2577 protections).
 	 */
 	public static final String ALLOW_FOREIGN_DATA_ADDRESS_PROP = FTP_NAME+".allowForeignDataAddress";
+	/** Delay (ms) before replying to a failed login, to slow down password guessing. */
+	public static final int DEFAULT_LOGIN_FAILURE_DELAY = 1000;
+	public static final String LOGIN_FAILURE_DELAY_PROP = FTP_NAME+".loginFailureDelay";
 
 	private volatile int bufferSize = Integer.getInteger(BUFFER_SIZE_PROP, DEFAULT_BUFFER_SIZE);
 	private volatile int dataTimeout = Integer.getInteger(DATA_TIMEOUT_PROP, DEFAULT_DATA_TIMEOUT);
 	private volatile int connectTimeout = Integer.getInteger(CONNECT_TIMEOUT_PROP, DEFAULT_CONNECT_TIMEOUT);
 	private volatile boolean allowForeignDataAddress = Boolean.getBoolean(ALLOW_FOREIGN_DATA_ADDRESS_PROP);
+	private volatile int loginFailureDelay = Integer.getInteger(LOGIN_FAILURE_DELAY_PROP, DEFAULT_LOGIN_FAILURE_DELAY);
 	private FileSource ftpRoot;
 	//private boolean useJdbc = false;
 	private FileSourceFactory factory = FileSourceFactory.getDefaultFactory();
@@ -111,11 +115,10 @@ public class FtpServer extends Server {
 
 		@Override
 		public SSLContext getSSLContext(String sslOrTsl) throws IOException {
-			String tmp = FtpServer.this.getProtocol();
-			FtpServer.this.setProtocol(sslOrTsl);
-			SSLContext ret = FtpServer.this.getSSLContext();
-			FtpServer.this.setProtocol(tmp);
-			return ret;
+			// Server.getSSLContext(String) builds the context under a lock. The old code
+			// swapped the server's shared protocol field with no lock, so two clients
+			// running AUTH at the same time could interfere with each other.
+			return FtpServer.this.getSSLContext(sslOrTsl);
 		}
 		
 	}
@@ -146,6 +149,12 @@ public class FtpServer extends Server {
 	
 	public FtpServer(FileSource root, boolean secure) {
 		this(FTP_PORT,FTP_NAME,secure);
+		// root was previously ignored
+		try {
+			setFtpRoot(root);
+		} catch (IOException e) {
+			throw new java.io.UncheckedIOException("Invalid FTP root "+root, e);
+		}
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -311,6 +320,10 @@ public class FtpServer extends Server {
 	
 	
 	public FileSource getFtpRoot() throws IOException {
+		if( ftpRoot == null ) {
+			// e.g. the configured root could not be created
+			throw new IOException("The FTP root is not configured (see "+ROOT_PROP+")");
+		}
 		if( !ftpRoot.exists()){
 			ftpRoot.mkdirs();
 		}
@@ -389,6 +402,24 @@ public class FtpServer extends Server {
 	 */
 	public void setAllowForeignDataAddress(boolean allow) {
 		this.allowForeignDataAddress = allow;
+	}
+
+	/**
+	 * @return the delay (ms) before replying to a failed PASS/ACCT.
+	 */
+	public int getLoginFailureDelay() {
+		return loginFailureDelay;
+	}
+
+	/**
+	 * @param loginFailureDelay delay (ms) before replying to a failed PASS/ACCT (0 = none).
+	 * Combined with the 3 attempts per connection limit this slows down password guessing.
+	 */
+	public void setLoginFailureDelay(int loginFailureDelay) {
+		if( loginFailureDelay < 0 ) {
+			throw new IllegalArgumentException("loginFailureDelay must be >= 0");
+		}
+		this.loginFailureDelay = loginFailureDelay;
 	}
 
 	public FileSourceFactory getFileSourceFactory() {

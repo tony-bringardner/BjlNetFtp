@@ -88,9 +88,13 @@ public class ClientFtpOutputStream extends OutputStream implements FTP {
 
     public void close() throws IOException {
     	if( !closed ) {
-    		completeUpload();
     		closed = true;
-    		client.streamHasClosed(path,this);
+    		try {
+    			completeUpload();
+    		} finally {
+    			// Always release the path, even if the upload failed
+    			client.streamHasClosed(path,this);
+    		}
     	}
     }
 
@@ -105,7 +109,9 @@ public class ClientFtpOutputStream extends OutputStream implements FTP {
         		throw new IOException("Error completing transfer.  response = "+res);
         	}
         } catch(SocketTimeoutException ex) {
-        	throw new IOException("Timeout Error completing the upload time="+(System.currentTimeMillis()-time));
+        	// The control connection is out of step now; reconnect on the next command
+        	client.abandonConnection();
+        	throw new IOException("Timeout Error completing the upload time="+(System.currentTimeMillis()-time), ex);
         } 
 
     }

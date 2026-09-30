@@ -250,6 +250,66 @@ public class TestSecurity {
 		}
 	}
 
+	// ------------------------------------------------------------------ AUTH / login
+
+	@Test
+	public void authMechanismIsCaseInsensitive() throws Exception {
+		File keystore = new File("target/serverkeystore.p12");
+		Assumptions.assumeTrue(keystore.exists(), "no test keystore (run ./makecert.sh)");
+		System.setProperty("FtpServer.KeyStoreName", keystore.getPath());
+		System.setProperty("FtpServer.KeyStorePassword", "peekab00");
+		System.setProperty("FtpServer.KeyStoreType", "PKCS12");
+		System.setProperty("FtpServer.Algorithm", "SunX509");
+
+		try (Session s = new Session(PORT)) {
+			s.send("AUTH bogus");
+			assertEquals(504, s.read(5000).code);
+
+			s.send("AUTH tls"); // lower case: was rejected with 504
+			assertEquals(234, s.read(5000).code);
+
+			// Complete the handshake and check the control channel works over TLS
+			javax.net.ssl.SSLContext ctx = javax.net.ssl.SSLContext.getInstance("TLS");
+			ctx.init(null, new javax.net.ssl.TrustManager[] { new TestFtpBaseTestClass.TrustAll() }, null);
+			try (javax.net.ssl.SSLSocket tls = (javax.net.ssl.SSLSocket) ctx.getSocketFactory()
+					.createSocket(s.socket(), "localhost", PORT, false)) {
+				tls.setUseClientMode(true);
+				tls.startHandshake();
+				java.io.Writer w = new java.io.OutputStreamWriter(tls.getOutputStream(), StandardCharsets.UTF_8);
+				java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(tls.getInputStream(), StandardCharsets.UTF_8));
+				w.write("NOOP\r\n");
+				w.flush();
+				String reply = r.readLine();
+				assertTrue(reply != null && reply.startsWith("200"), "NOOP over TLS: " + reply);
+			}
+		}
+	}
+
+	@Test
+	public void failedLoginIsDelayed() throws Exception {
+		int old = server.getLoginFailureDelay();
+		server.setLoginFailureDelay(400);
+		try (Socket control = new Socket()) {
+			control.connect(new InetSocketAddress("127.0.0.1", PORT), 5000);
+			control.setSoTimeout(5000);
+			java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(control.getInputStream(), StandardCharsets.UTF_8));
+			java.io.Writer out = new java.io.OutputStreamWriter(control.getOutputStream(), StandardCharsets.UTF_8);
+			assertTrue(in.readLine().startsWith("200"));
+			out.write("USER nobody\r\n");
+			out.flush();
+			assertTrue(in.readLine().startsWith("331"));
+			long start = System.currentTimeMillis();
+			out.write("PASS wrong password\r\n");
+			out.flush();
+			String reply = in.readLine();
+			long elapsed = System.currentTimeMillis() - start;
+			assertTrue(reply.startsWith("332") || reply.startsWith("530"), "failed login: " + reply);
+			assertTrue(elapsed >= 350, "failed login replied after only " + elapsed + "ms");
+		} finally {
+			server.setLoginFailureDelay(old);
+		}
+	}
+
 	private static void deleteAll(File f) {
 		if (f == null || !f.exists() && !Files.isSymbolicLink(f.toPath())) {
 			return;
