@@ -113,6 +113,8 @@ public class Site  extends BaseCommand  implements FtpCommand {
 
 		if( !(cmd.equalsIgnoreCase(CMD_ROOT) || cmd.equalsIgnoreCase(CMD_SET_FACTORY))) {			
 			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Unknown SITE command = '"+cmd+"'");
+			// one reply per command: it used to go on to the permission check and reply again (BJL-26)
+			return;
 		}
 		
 		// All others required admin rights
@@ -201,15 +203,15 @@ public class Site  extends BaseCommand  implements FtpCommand {
 		FileSourceFactory factory = processor.getFactory();
 
 		FileSourceFactory factory2 = FileSourceFactory.getFileSourceFactory(id);
-		processor.logDebug("SITE '"+CMD_SET_FACTORY+"' id = "+id+" result="+factory2);
+		processor.logDebug("SITE '"+CMD_SET_FACTORY+"' id = "+id+" result="+factory2+" (was "+factory.getTypeId()+")");
 		if( factory2 == null ) {
-			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Invalid FileSourceFactory ='"+id);
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Invalid FileSourceFactory ='"+id+"'");
 			return;
-		} else {
-			processor.setFactory(factory);
 		}
+		// the new factory (it used to set the current one again, so nothing changed; BJL-26)
+		processor.setFactory(factory2);
 
-		processor.reply(REPLY_200_OK,"FileSourceFactory ="+factory.getTypeId());
+		processor.reply(REPLY_200_OK,"FileSourceFactory ="+factory2.getTypeId());
 
 	}
 
@@ -225,12 +227,14 @@ public class Site  extends BaseCommand  implements FtpCommand {
 		FileSource newRoot = processor.getFactory().createFileSource(path);
 		if( !newRoot.exists() || !newRoot.isDirectory()) {
 			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,path+" is not an existing directory");
-		} else {
-			processor.setFtpRoot(newRoot);
-			processor.logInfo("Set root to "+processor.getCurrentDir());
+			// one reply per command: it used to go on and reply 200 as well (BJL-26)
+			return;
 		}
+		processor.setFtpRoot(newRoot);
+		processor.logInfo("Set root to "+newRoot);
 
-		processor.reply(REPLY_200_OK,"Root is "+processor.getFtpRoot());
+		// the path as given (the root object's text could show more of the server's file system)
+		processor.reply(REPLY_200_OK,"Root is "+path);
 	}
 
 	/**
@@ -252,7 +256,7 @@ public class Site  extends BaseCommand  implements FtpCommand {
 		try {
 			time = Long.parseLong(tmp);
 		} catch (Exception e) {
-			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Couldn't parse "+tmp+" as long \n"+e);
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Couldn't parse "+tmp+" as a number of milliseconds");
 			return;	
 		}
 

@@ -558,9 +558,38 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		super.reply(text);
 	}
 
+	/**
+	 * Sends a reply. Text with line breaks is sent as an RFC 959 multi-line reply
+	 * ("501-first line", ..., "501 last line"); it used to go out as extra lines with
+	 * no code, which a client can't parse (BJL-26).
+	 */
 	@Override
 	public synchronized void reply(int responseCode, String text) throws IOException {
-		super.reply(responseCode, text);
+		String t = text == null ? "" : text;
+		if( t.indexOf('\n') < 0 && t.indexOf('\r') < 0 ) {
+			super.reply(responseCode, t);
+			return;
+		}
+		String[] lines = t.split("\r\n|\r|\n", -1);
+		int last = lines.length-1;
+		while( last > 0 && lines[last].trim().isEmpty()) {
+			last--;
+		}
+		if( last == 0 ) {
+			super.reply(responseCode, lines[0]);
+			return;
+		}
+		String code = translateResponseCode(responseCode);
+		reply(code+"-"+lines[0]);
+		for (int idx = 1; idx < last; idx++) {
+			String line = lines[idx];
+			// a line in the middle must not look like a reply of its own (RFC 959 4.2)
+			if( line.length() >= 3 && Character.isDigit(line.charAt(0)) && Character.isDigit(line.charAt(1)) && Character.isDigit(line.charAt(2))) {
+				line = " "+line;
+			}
+			reply(line);
+		}
+		super.reply(responseCode, lines[last]);
 	}
 
 	public Object getTempValue(String key){
