@@ -184,6 +184,101 @@ public class TestClientBehaviour {
 		assertEquals(dir.getCanonicalPath(), s.getFtpRoot().getCanonicalPath());
 	}
 
+	// ------------------------------------------------------------------ EPSV / active / one transfer / reconnect
+
+	@Test
+	public void usesEpsvByDefault() throws Exception {
+		FtpClient c = client();
+		try {
+			try (InputStream in = c.getInputStream("small.txt")) {
+				assertEquals("hello", new String(in.readAllBytes()));
+			}
+			String d = c.dialog.toString();
+			assertTrue(d.contains("Write:EPSV") && !d.contains("Write:PASV"), d);
+		} finally {
+			c.close();
+		}
+	}
+
+	@Test
+	public void fallsBackToPasvWhenEpsvIsUnsupported() throws Exception {
+		try (FakeFtpServer fake = new FakeFtpServer()) {
+			fake.supportEpsv = false;
+			FtpClient c = fakeClient(fake);
+			try {
+				for (int i = 0; i < 2; i++) {
+					try (InputStream in = c.getInputStream("x")) {
+						assertEquals("fake data", new String(in.readAllBytes()));
+					}
+				}
+				java.util.List<String> cmds = fake.commands(1);
+				assertEquals(1, cmds.stream().filter(x -> x.startsWith("EPSV")).count(), "EPSV should be tried once: " + cmds);
+				assertEquals(2, cmds.stream().filter(x -> x.startsWith("PASV")).count(), cmds.toString());
+			} finally {
+				c.close();
+			}
+		}
+	}
+
+	@Test
+	public void activeModeTransfers() throws Exception {
+		FtpClient c = client();
+		c.setActive(true);
+		try {
+			try (java.io.OutputStream out = c.getOutputStream("active-up.txt")) {
+				out.write("active".getBytes());
+			}
+			try (InputStream in = c.getInputStream("active-up.txt")) {
+				assertEquals("active", new String(in.readAllBytes()));
+			}
+			assertTrue(c.dialog.toString().contains("Write:PORT 127,0,0,1,"), c.dialog.toString());
+		} finally {
+			c.close();
+		}
+	}
+
+	@Test
+	public void secondTransferOnSameConnectionIsRefused() throws Exception {
+		FtpClient c = client();
+		try {
+			InputStream first = c.getInputStream("small.txt");
+			assertThrows(IOException.class, () -> c.getInputStream("big.bin"), "second stream");
+			assertThrows(IOException.class, () -> c.executeSize("small.txt"), "command while streaming");
+			assertEquals("hello", new String(first.readAllBytes()));
+			first.close();
+			try (InputStream in = c.getInputStream("small.txt")) {
+				assertEquals("hello", new String(in.readAllBytes()));
+			}
+		} finally {
+			c.close();
+		}
+	}
+
+	@Test
+	public void reconnectsAndRestoresDirectoryWhenServerDropsConnection() throws Exception {
+		try (FakeFtpServer fake = new FakeFtpServer()) {
+			FtpClient c = fakeClient(fake);
+			try {
+				assertTrue(c.setCurrentDir("/some/dir"));
+				fake.dropFirstConnectionOn = "NOOP"; // like an idle timeout
+				assertTrue(c.executeCommand("NOOP").isPositiveComplet(), "NOOP should be retried on a new connection");
+				java.util.List<String> second = fake.commands(2);
+				assertTrue(second.contains("CWD /some/dir"), "directory not restored: " + second);
+				assertEquals("/some/dir", c.getCurrentDir());
+			} finally {
+				c.close();
+			}
+		}
+	}
+
+	private static FtpClient fakeClient(FakeFtpServer fake) throws IOException {
+		FtpClient c = new FtpClient("127.0.0.1", fake.port());
+		c.setRequestSecure(false);
+		c.getLogger().setLevel(Level.ERROR);
+		assertTrue(c.connect("anonymous", "x", null));
+		return c;
+	}
+
 	private static void deleteAll(File f) {
 		if (f == null || !f.exists()) {
 			return;

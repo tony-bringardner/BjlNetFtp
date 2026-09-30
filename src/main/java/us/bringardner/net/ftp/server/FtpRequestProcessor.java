@@ -159,7 +159,8 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 
 	private boolean channelSecure = false;
 	private int pbsz=-1;
-	private String protLevel = DATA_CHANNEL_PROTECTION_LEVEL_CLEAR;
+	/** Data channel protection level set by PROT, null until PROT is sent (see isDataChannelSecure) */
+	private String protLevel = null;
 	private int loginAttempts=0;
 	private int linger = -2;
 	public transient StreamController transferInProcess = new StreamController();
@@ -907,13 +908,33 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	 * @return a new ServerSocketFactory
 	 */
 	public ServerSocketFactory getServerSocketFactory() {
-		ServerSocketFactory ret = getServer().getServerSocketFactory(
-				isChannelSecure() 
-				// FileZilla won't work with this on and my client won'nt work with it off
-				//TODO: what's going on	|| isSecure()
-				);
+		return getServer().getServerSocketFactory(isDataChannelSecure());
+	}
 
-		return ret;
+	/**
+	 * RFC 4217 data channel protection:
+	 * <ul>
+	 * <li>PROT P: data connections use TLS.</li>
+	 * <li>PROT C: data connections are clear.</li>
+	 * <li>No PROT: clear after AUTH TLS (the RFC default), TLS for implicit TLS
+	 *     (the control connection was TLS from the start).</li>
+	 * </ul>
+	 * Previously this followed only "AUTH was done", so PROT C was ignored and implicit
+	 * TLS used clear data connections that no TLS client could talk to.
+	 */
+	public boolean isDataChannelSecure() {
+		String level = protLevel;
+		if( level == null ) {
+			return isSecure();
+		}
+		return DATA_CHANNEL_PROTECTION_LEVEL_PRIVATE.equals(level) && (isSecure() || isChannelSecure());
+	}
+
+	/**
+	 * @return true if the control connection is protected (implicit TLS or AUTH).
+	 */
+	public boolean isControlChannelSecure() {
+		return isSecure() || isChannelSecure();
 	}
 
 	public boolean isChannelSecure() {
@@ -1034,7 +1055,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	 */
 	public SocketFactory getSocketFactory() {
 
-		SocketFactory ret = getServer().getSocketFactory(isChannelSecure());
+		SocketFactory ret = getServer().getSocketFactory(isDataChannelSecure());
 
 		return ret;
 	}
@@ -1045,8 +1066,16 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	public void setPbsz(int pbsz) {
 		this.pbsz = pbsz;
 	}
+	/**
+	 * @return the PROT level in effect: the one sent by the client, or the default
+	 * (P for implicit TLS, C otherwise).
+	 */
 	public String getProtLevel() {
-		return protLevel;
+		String level = protLevel;
+		if( level == null ) {
+			return isSecure() ? DATA_CHANNEL_PROTECTION_LEVEL_PRIVATE : DATA_CHANNEL_PROTECTION_LEVEL_CLEAR;
+		}
+		return level;
 	}
 	public void setProtLevel(String protLevel) {
 		this.protLevel = protLevel;
@@ -1054,7 +1083,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 
 	public void reset() {
 		setPbsz(-1);
-		setProtLevel(DATA_CHANNEL_PROTECTION_LEVEL_CLEAR);
+		setProtLevel(null);
 		try {
 			makeChannelSecure(null);
 		} catch (Exception ex) {

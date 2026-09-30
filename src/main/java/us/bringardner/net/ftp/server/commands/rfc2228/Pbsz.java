@@ -93,21 +93,24 @@ public class Pbsz extends NoAuthReqBaseCommand {
 	 */
 	public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
 		String commandLine = context.getCommandLine();
-		String [] args = commandLine.split(" ");
+		String [] args = commandLine.trim().split("\\s+");
 		if( args.length != 2) {
-			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Wrong number of args");
-		} else if( !processor.isChannelSecure()) {
-			processor.reply(REPLY_503_BAD_SEQ_OF_COMMANDS,"Channel is not secure");
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Syntax: PBSZ <size>");
+		} else if( !processor.isControlChannelSecure()) {
+			// was isChannelSecure() only, which rejected PBSZ over implicit TLS
+			processor.reply(REPLY_503_BAD_SEQ_OF_COMMANDS,"PBSZ requires a secure control connection (AUTH first)");
 		} else 	{
 			try {
-				int val = Integer.parseInt(args[1]);
-				processor.setPbsz(val);
-				processor.reply(REPLY_200_OK,"OK");
-			} catch(Exception ex) {
-				processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Error parsing PBSZ ("+ex+")");
+				long requested = Long.parseLong(args[1]);
+				if( requested < 0 ) {
+					throw new NumberFormatException(args[1]);
+				}
+				// RFC 4217: TLS has no protection buffer, the size is always 0
+				processor.setPbsz(0);
+				processor.reply(REPLY_200_OK,"PBSZ=0");
+			} catch(NumberFormatException ex) {
+				processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Invalid PBSZ size "+args[1]);
 			}
 		}
-		
 	}
-
 }

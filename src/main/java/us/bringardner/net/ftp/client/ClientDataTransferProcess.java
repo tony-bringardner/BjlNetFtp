@@ -39,7 +39,6 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 
-import javax.net.ServerSocketFactory;
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -129,27 +128,59 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 	}
 
 
+	/** Active mode listener, bound before PORT/EPRT is sent. */
+	private volatile ServerSocket listener;
+
+	void setListener(ServerSocket listener) {
+		this.listener = listener;
+	}
+
+	/**
+	 * Active mode: accept the server's data connection. For a protected data channel the
+	 * client takes the TLS client role (RFC 4217), so the accepted socket is wrapped as a
+	 * TLS client socket.
+	 */
 	private Socket getServerSocket() throws IOException {
 		FtpClient client = getClient();
-		ServerSocketFactory factory = client.getServerSocketFactory();
-		// Closed after one connection (previously the listener was never closed)
-		try (ServerSocket svr = factory.createServerSocket()) {
-			int bufSz = client.getTransferBufferSize();
-			if( bufSz > 0 ) {
-				// Must be set before bind/accept to take effect for TCP window scaling
-				svr.setReceiveBufferSize(bufSz);
-			}
-			svr.bind(new InetSocketAddress(getPort()), 1);
+		ServerSocket svr = listener;
+		if( svr == null ) {
+			throw new IOException("Active data connection has no listener");
+		}
+		try {
 			svr.setSoTimeout(client.getTransferTimeout());
 			Socket ret = svr.accept();
 			ret.setSoTimeout(client.getTransferTimeout());
+			if( client.isDataChannelSecure() ) {
+				SocketFactory f = client.getSocketFactory();
+				if( f instanceof SSLSocketFactory ) {
+					SSLSocket ssl = (SSLSocket) ((SSLSocketFactory) f).createSocket(ret,
+							ret.getInetAddress().getHostAddress(), ret.getPort(), true);
+					ssl.setUseClientMode(true);
+					ssl.setSoTimeout(client.getTransferTimeout());
+					ret = ssl;
+				}
+			}
 			return ret;
+		} finally {
+			// one connection per PORT
+			closeListener();
+		}
+	}
+
+	private void closeListener() {
+		ServerSocket svr = listener;
+		listener = null;
+		if( svr != null ) {
+			try {
+				svr.close();
+			} catch (IOException e) {
+			}
 		}
 	}
 	
 	private Socket getClientSocket() throws UnknownHostException, IOException {
 		FtpClient client = getClient();
-		SocketFactory factory = client.getSocketFactory();
+		SocketFactory factory = client.getDataSocketFactory();
 		// Create unconnected so buffer sizes apply to the connection (they must be set
 		// before connect for TCP window scaling) and so we can use a connect timeout.
 		Socket ret = factory.createSocket();
@@ -316,6 +347,7 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 	}
 
 	public void close() {
+		closeListener();
 		if( socket != null && !socket.isClosed()) {
 
 			try {

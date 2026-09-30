@@ -110,14 +110,30 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private int cmdLinger = -1;
 	private int txferTimeout = 60000;
 	private int transferLinger = -1;    
-	private String currentDir;
+	private volatile String currentDir;
 	private ClientFtpResponse lastResponse;
 
-	private String userId;
-	private String password;
-	private String account;
+	private volatile String userId;
+	private volatile String password;
+	private volatile String account;
 	private Map<String, String> featResponse;
 	private Map<String,AutoCloseable> streamsInProcess = new HashMap<>();
+	/** Try EPSV before PASV (RFC 2428). */
+	private volatile boolean useEpsv = true;
+	/** Set when the server rejected EPSV, so PASV is used for the rest of the session. */
+	private volatile boolean epsvRejected = false;
+	/** Reconnect (and retry safe commands once) when the server has closed the control connection. */
+	private volatile boolean autoReconnect = true;
+	/** Set by readLine() when the server closed the control connection. */
+	private volatile boolean peerClosed = false;
+
+	/**
+	 * Commands that can be sent again on a new connection without changing anything on
+	 * the server (after the connection was found to be closed).
+	 */
+	private static final java.util.Set<String> RETRY_SAFE = new java.util.HashSet<>(java.util.Arrays.asList(
+			"NOOP","PWD","XPWD","CWD","CDUP","TYPE","MODE","STRU","PASV","EPSV","SIZE","MDTM",
+			"FEAT","OPTS","MLST","SYST","STAT","HELP"));
 	
 
 
@@ -141,7 +157,9 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private int transferBufferSize = 1024*65;
 	private boolean usePasvAddress = false;
 	private boolean active = false;
-	private boolean channelSecure;
+	private volatile boolean channelSecure;
+	/** true if data connections use TLS (PROT P accepted, or a legacy server without PBSZ) */
+	private volatile boolean dataChannelSecure;
 	private volatile boolean forceList;
 
 	/**
@@ -581,6 +599,9 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 */
 	protected String readLine() throws IOException {
 		String ret = getInput().readLine();
+		if( ret == null ) {
+			peerClosed = true;
+		}
 		if( isDebugEnabled() ) {
 			logDebug(""+Thread.currentThread().hashCode()+" Read: "+ret);
 		}
@@ -601,6 +622,12 @@ public class FtpClient extends SecureBaseObject implements FTP {
 		connected = false;
 		mlstTested = false;
 		featResponse = null;
+		if( !isSecure() && channelSecure ) {
+			setSocketFactory(SocketFactory.getDefault());
+			setServerSocketFactory(ServerSocketFactory.getDefault());
+		}
+		channelSecure = false;
+		dataChannelSecure = false;
 		if( s != null ) {
 			try {
 				s.close();
@@ -650,6 +677,14 @@ public class FtpClient extends SecureBaseObject implements FTP {
 			setSocketFactory(SocketFactory.getDefault());
 			setServerSocketFactory(ServerSocketFactory.getDefault());
 		}
+		// A new connection must negotiate AUTH again. Previously channelSecure stayed true,
+		// so a reconnect skipped AUTH and sent USER/PASS in clear text.
+		channelSecure = false;
+		dataChannelSecure = false;
+		sslSocket = null;
+		// a new session starts in the server's default directory
+		currentDir = null;
+		epsvRejected = false;
 	}
 
 	/**
@@ -662,10 +697,110 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * 
 	 */
 	public synchronized ClientFtpResponse executeCommand(String command) throws  IOException {
-		if( !connected ) {
-			connect(userId,password,account);
+		String name = firstToken(command);
+		if( !streamsInProcess.isEmpty() ) {
+			// One control connection can only run one transfer; interleaving commands with
+			// an open stream reads the wrong replies.
+			throw new IOException("A transfer is in progress ("+streamsInProcess.keySet()+"); close its stream before sending "
+					+name+", or use a separate FtpClient for concurrent transfers.");
 		}
-		return sendCommand(command);
+		boolean wasConnected = connected;
+		if( !connected ) {
+			reconnect();
+		}
+
+		peerClosed = false;
+		IOException failure = null;
+		ClientFtpResponse res = null;
+		try {
+			res = sendCommand(command);
+		} catch (java.net.SocketTimeoutException e) {
+			throw e;
+		} catch (IOException e) {
+			failure = e;
+		}
+		if( failure == null && !peerClosed ) {
+			return res;
+		}
+
+		// The server closed the connection (e.g. idle timeout) or the network failed.
+		abandonConnection();
+		if( autoReconnect && wasConnected && RETRY_SAFE.contains(name) ) {
+			logInfo("Control connection to "+getHost()+" was closed, reconnecting to retry "+name);
+			reconnect();
+			return sendCommand(command);
+		}
+		if( failure != null ) {
+			throw new IOException("Connection to "+getHost()+" lost during "+name+"; it will be reopened on the next command", failure);
+		}
+		return res; // the 421 left by a closed connection
+	}
+
+	/**
+	 * Connect again with the saved credentials and restore the current directory.
+	 */
+	private void reconnect() throws IOException {
+		String dir = currentDir;
+		if( !connect(userId,password,account) ) {
+			throw new IOException("Can't reconnect to "+getHost()+":"+getPort()+" as "+userId);
+		}
+		if( dir != null ) {
+			ClientFtpResponse res = sendCommand(CWD+" "+dir);
+			if( res.isPositiveComplet() ) {
+				currentDir = dir;
+			} else {
+				logError("Can't restore directory "+dir+" after reconnect: "+res);
+				currentDir = null;
+			}
+		}
+	}
+
+	private static String firstToken(String command) {
+		String c = command.trim();
+		int idx = c.indexOf(' ');
+		return (idx < 0 ? c : c.substring(0, idx)).toUpperCase(java.util.Locale.ROOT);
+	}
+
+	/**
+	 * @return true (default) to reconnect and retry safe commands once when the server
+	 * has closed the control connection.
+	 */
+	public boolean isAutoReconnect() {
+		return autoReconnect;
+	}
+
+	public void setAutoReconnect(boolean autoReconnect) {
+		this.autoReconnect = autoReconnect;
+	}
+
+	/**
+	 * @return true (default) to try EPSV before PASV.
+	 */
+	public boolean isUseEpsv() {
+		return useEpsv;
+	}
+
+	/**
+	 * @param useEpsv true (default) to use EPSV (RFC 2428, needed for IPv6) and fall back
+	 * to PASV when the server doesn't support it; false to always use PASV.
+	 */
+	public void setUseEpsv(boolean useEpsv) {
+		this.useEpsv = useEpsv;
+	}
+
+	boolean isEpsvRejected() {
+		return epsvRejected;
+	}
+
+	void setEpsvRejected(boolean rejected) {
+		this.epsvRejected = rejected;
+	}
+
+	/**
+	 * @return the local address of the control connection (used for PORT/EPRT).
+	 */
+	java.net.InetAddress getControlLocalAddress() throws IOException {
+		return getSocket().getLocalAddress();
 	}
 
 	/**
@@ -737,6 +872,9 @@ public class FtpClient extends SecureBaseObject implements FTP {
 
 				if( res.isPositiveComplet()) {
 					connected = true;
+					if( isSecure() || isChannelSecure() ) {
+						negotiateDataProtection();
+					}
 				}
 
 			}
@@ -802,8 +940,11 @@ public class FtpClient extends SecureBaseObject implements FTP {
 
 		ClientFtpResponse res = executeCommand(CWD,dirName); 
 		boolean ret = res.isPositiveComplet();
-		// Force a PWD to get the correct value
+		// Force a PWD to get the correct value (also needed to restore it after a reconnect)
 		currentDir = null;
+		if( ret ) {
+			executePwd();
+		}
 		return ret;
 	}
 
@@ -833,6 +974,9 @@ public class FtpClient extends SecureBaseObject implements FTP {
 		ClientFtpResponse res = executeCommand(CDUP);
 		currentDir=null;
 		boolean ret = res.isPositiveComplet();
+		if( ret ) {
+			executePwd();
+		}
 
 		return ret;
 	}
@@ -918,6 +1062,48 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		}
 
 		return ret;
+	}
+
+	/**
+	 * RFC 4217: after logging in on a secure control connection, ask for protected data
+	 * connections (PBSZ 0, PROT P). If the server refuses PROT P, data connections are clear.
+	 * A server that doesn't know PBSZ at all is treated as a legacy server that always uses
+	 * TLS for data after AUTH (older versions of this project's server).
+	 */
+	private void negotiateDataProtection() throws IOException {
+		ClientFtpResponse res = sendCommand(PBSZ+" 0");
+		if( !res.isPositiveComplet() ) {
+			logDebug("Server does not support PBSZ ("+res+"), assuming protected data connections");
+			dataChannelSecure = true;
+			return;
+		}
+		res = sendCommand(PROT+" P");
+		dataChannelSecure = res.isPositiveComplet();
+		if( !dataChannelSecure ) {
+			logInfo("Server refused PROT P ("+res+"), data connections will not be encrypted");
+		}
+	}
+
+	/**
+	 * @return true if data connections are encrypted.
+	 */
+	public boolean isDataChannelSecure() {
+		return dataChannelSecure;
+	}
+
+	/**
+	 * @return the SocketFactory for passive data connections: TLS when the data channel is
+	 * protected, plain otherwise.
+	 */
+	public SocketFactory getDataSocketFactory() throws IOException {
+		return dataChannelSecure ? getSocketFactory() : SocketFactory.getDefault();
+	}
+
+	/**
+	 * @return the ServerSocketFactory for active data connections.
+	 */
+	public ServerSocketFactory getDataServerSocketFactory() throws IOException {
+		return dataChannelSecure ? getServerSocketFactory() : ServerSocketFactory.getDefault();
 	}
 
 	/**
@@ -1185,8 +1371,10 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	}
 
 	private synchronized void checkStreamInProcess(String path) throws IOException {
-		if( streamsInProcess.containsKey(path)) {
-			throw new IOException(path+" already has a transfer in progress.  Make sure to close any stream before attempting another operation. ");
+		// Any open stream blocks the control connection, not just one for the same path
+		if( !streamsInProcess.isEmpty()) {
+			throw new IOException("A transfer is in progress ("+streamsInProcess.keySet()+"). Close its stream before starting "
+					+path+", or use a separate FtpClient for concurrent transfers.");
 		}	
 	}
 

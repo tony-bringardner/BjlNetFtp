@@ -39,9 +39,35 @@ import java.io.IOException;
  */
 public class ClientPassiveDataConnection extends ClientDataTransferProcess {
 
+    private static final java.util.regex.Pattern EPSV_REPLY =
+            java.util.regex.Pattern.compile("\\((.)\\1\\1(\\d+)\\1\\)");
+
     public ClientPassiveDataConnection(FtpClient client) throws IOException {    	
         setClient(client);
         setPassive(true);
+
+        /*
+         * RFC 2428: EPSV returns only a port, the address is the control connection's
+         * (works for IPv6 and through NAT). Fall back to PASV if the server doesn't know it.
+         */
+        if( client.isUseEpsv() && !client.isEpsvRejected() ) {
+            ClientFtpResponse res = client.executeCommand(EPSV);
+            java.util.regex.Matcher m = EPSV_REPLY.matcher(res.getResponseText());
+            // 229 is the RFC reply; older versions of this project's server replied 227
+            if( (res._getResponseCode() == 229 || res._getResponseCode() == 227) && m.find() ) {
+                setHost(client.getHost());
+                setPort(Integer.parseInt(m.group(2)));
+                return;
+            }
+            int code = res._getResponseCode();
+            if( code >= 500 ) {
+                // not supported (500/502/504) or wrong protocol (522): use PASV from now on
+                client.setEpsvRejected(true);
+            } else {
+                throw new IOException("Invalid response from "+EPSV+" command = "+res);
+            }
+        }
+
         ClientFtpResponse res = getClient().executeCommand(PASV);
         if( !res.isPositiveComplet()) {
             throw new IOException("Invalid response from "+PASV+" command = "+res._getResponseCode());

@@ -42,35 +42,42 @@ public class ClientActiveDataConnection extends ClientDataTransferProcess {
     public ClientActiveDataConnection(FtpClient client) throws IOException {
         setClient(client);
         setPassive(false);
-        
-    	/* 
-    	 * RFC 959
-    	 * DATA PORT (PORT)
 
-                The argument is a HOST-PORT specification for the data port
-                to be used in data connection.  There are defaults for both
-                the user and server data ports, and under normal
-                circumstances this command and its reply are not needed.  If
-                this command is used, the argument is the concatenation of a
-                32-bit Internet host address and a 16-bit TCP port address.
-                This address information is broken into 8-bit fields and the
-                value of each field is transmitted as a decimal number (in
-                character string representation).  The fields are separated
-                by commas.  A port command would be:
+        /*
+         * Listen BEFORE sending PORT: servers may connect as soon as they receive it.
+         * (This used to send a bare "PORT" with no address, which servers reject with 501.)
+         */
+        java.net.InetAddress local = client.getControlLocalAddress();
+        java.net.ServerSocket listener = new java.net.ServerSocket();
+        try {
+            int bufSz = client.getTransferBufferSize();
+            if( bufSz > 0 ) {
+                listener.setReceiveBufferSize(bufSz);
+            }
+            listener.bind(new java.net.InetSocketAddress(local, 0), 1);
+            setListener(listener);
+            String host = local.getHostAddress();
+            int pct = host.indexOf('%');
+            if( pct > 0 ) {
+                host = host.substring(0, pct); // drop IPv6 scope id
+            }
+            setHost(host);
+            setPort(listener.getLocalPort());
 
-                   PORT h1,h2,h3,h4,p1,p2
-
-                where h1 is the high order 8 bits of the Internet host
-                address.
-
-    	 */
-        
-        ClientFtpResponse res = client.executeCommand(PORT);
-        if( !res.isPositiveComplet()) {
-            throw new IOException("Invalid response from "+PORT+" command = "+res._getResponseCode());
+            ClientFtpResponse res;
+            if( local instanceof java.net.Inet4Address ) {
+                res = client.executeCommand(PORT, getFormatedHostAndPort());
+            } else {
+                // RFC 2428 for IPv6
+                res = client.executeCommand(EPRT, "|2|"+host+"|"+getPort()+"|");
+            }
+            if( !res.isPositiveComplet()) {
+                throw new IOException("Invalid response from "+PORT+"/"+EPRT+" command = "+res);
+            }
+        } catch (IOException e) {
+            close();
+            throw e;
         }
-        setHostAndPort(res.getResponseText());
-        
     }
     
     /* (non-Javadoc)

@@ -121,24 +121,25 @@ public class Prot extends NoAuthReqBaseCommand {
 	 */
 	public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
 		String commandLine = context.getCommandLine();
-		String [] args = commandLine.split(" ");
+		String [] args = commandLine.trim().split("\\s+");
 		if( args.length != 2) {
-			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Wrong number of args");
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Syntax: PROT C|P");
+		} else if( !processor.isControlChannelSecure()) {
+			processor.reply(REPLY_503_BAD_SEQ_OF_COMMANDS,"PROT requires a secure control connection (AUTH first)");
 		} else if( processor.getPbsz() < 0 ) {
 			processor.reply(REPLY_503_BAD_SEQ_OF_COMMANDS,"PBSZ has not been set.");
 		} else 	{
-			if( args[1].equals(DATA_CHANNEL_PROTECTION_LEVEL_CLEAR)
-					|| args[1].equals(DATA_CHANNEL_PROTECTION_LEVEL_CONFIDENTIAL)
-					|| args[1].equals(DATA_CHANNEL_PROTECTION_LEVEL_PRIVATE)
-					|| args[1].equals(DATA_CHANNEL_PROTECTION_LEVEL_SAFE)
-					) {
-				processor.setProtLevel(args[1]);
-				processor.reply(REPLY_200_OK,"OK");
+			String level = args[1].toUpperCase(java.util.Locale.ROOT);
+			if( level.equals(DATA_CHANNEL_PROTECTION_LEVEL_CLEAR) || level.equals(DATA_CHANNEL_PROTECTION_LEVEL_PRIVATE)) {
+				// Applies to data connections opened after this command
+				processor.setProtLevel(level);
+				processor.reply(REPLY_200_OK,"Protection level set to "+level);
+			} else if( level.equals(DATA_CHANNEL_PROTECTION_LEVEL_SAFE) || level.equals(DATA_CHANNEL_PROTECTION_LEVEL_CONFIDENTIAL)) {
+				// RFC 4217: TLS supports only C and P
+				processor.reply(REPLY_536_PROT_LEVEL_NOT_SUPPORTED_BY_MECH,"Protection level "+level+" not supported, use C or P");
 			} else {
-				processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Invalid Level ("+args[1]+")");
+				processor.reply(REPLY_504_NOT_IMP_FOR_PARAM,"Unknown protection level "+args[1]);
 			}
 		}
-		
 	}
-
 }
