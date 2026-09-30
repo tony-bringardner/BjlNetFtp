@@ -4,7 +4,7 @@
 
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>us.bringardner</groupId>
-	<version>0.1.1</version>
+	<version>1.0.0</version>
 	<artifactId>bjl_net_ftp</artifactId>
 	<name>NetFtp</name>
 	<inceptionYear>2004</inceptionYear>
@@ -93,12 +93,12 @@
 		<dependency>
   			<groupId>us.bringardner</groupId>
   			<artifactId>bjl_file_system</artifactId>
-  			<version>0.1.1</version>
+  			<version>1.0.0</version>
 		</dependency>
 		<dependency>
   			<groupId>us.bringardner</groupId>
   			<artifactId>bjl_net_framework</artifactId>
-  			<version>0.1.1</version>
+  			<version>1.0.0</version>
 		</dependency>
 
 		<dependency>
