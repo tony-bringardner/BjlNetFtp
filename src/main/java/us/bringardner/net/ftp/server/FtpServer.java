@@ -93,6 +93,33 @@ public class FtpServer extends Server {
 	 * address (needed for FXP / server-to-server transfers). Default false (RFC 2577 protections).
 	 */
 	public static final String ALLOW_FOREIGN_DATA_ADDRESS_PROP = FTP_NAME+".allowForeignDataAddress";
+	/**
+	 * How symbolic links inside a user's root are treated. {@code ..} can never leave the
+	 * root in any mode (it is resolved on the virtual path first).
+	 */
+	public enum SymlinkPolicy {
+		/** Links that lead outside the root are refused (default). */
+		STRICT,
+		/** Links may lead outside the root only into the directories listed in allowedLinkTargets. */
+		ALLOWED_TARGETS,
+		/** Every link inside the root is followed, wherever it points (only when users can't create links). */
+		FOLLOW;
+
+		/** Parse "strict", "allowedTargets" / "allowed_targets" or "follow" (case-insensitive). */
+		public static SymlinkPolicy parse(String value) {
+			String v = value.trim().replace("_", "").replace("-", "").toLowerCase(java.util.Locale.ROOT);
+			switch (v) {
+			case "strict": return STRICT;
+			case "allowedtargets": return ALLOWED_TARGETS;
+			case "follow": return FOLLOW;
+			default: throw new IllegalArgumentException("Invalid symlink policy '"+value+"' (use strict, allowedTargets or follow)");
+			}
+		}
+	}
+	public static final String SYMLINK_POLICY_PROP = FTP_NAME+".symlinkPolicy";
+	/** Directories that links may lead into with SymlinkPolicy.ALLOWED_TARGETS, separated by commas. */
+	public static final String ALLOWED_LINK_TARGETS_PROP = FTP_NAME+".allowedLinkTargets";
+
 	/** Delay (ms) before replying to a failed login, to slow down password guessing. */
 	public static final int DEFAULT_LOGIN_FAILURE_DELAY = 1000;
 	public static final String LOGIN_FAILURE_DELAY_PROP = FTP_NAME+".loginFailureDelay";
@@ -102,6 +129,8 @@ public class FtpServer extends Server {
 	private volatile int connectTimeout = Integer.getInteger(CONNECT_TIMEOUT_PROP, DEFAULT_CONNECT_TIMEOUT);
 	private volatile boolean allowForeignDataAddress = Boolean.getBoolean(ALLOW_FOREIGN_DATA_ADDRESS_PROP);
 	private volatile int loginFailureDelay = Integer.getInteger(LOGIN_FAILURE_DELAY_PROP, DEFAULT_LOGIN_FAILURE_DELAY);
+	private volatile SymlinkPolicy symlinkPolicy = SymlinkPolicy.parse(System.getProperty(SYMLINK_POLICY_PROP, "strict"));
+	private volatile java.util.List<String> allowedLinkTargets = parseTargets(System.getProperty(ALLOWED_LINK_TARGETS_PROP, ""));
 	private FileSource ftpRoot;
 	//private boolean useJdbc = false;
 	private FileSourceFactory factory = FileSourceFactory.getDefaultFactory();
@@ -420,6 +449,58 @@ public class FtpServer extends Server {
 			throw new IllegalArgumentException("loginFailureDelay must be >= 0");
 		}
 		this.loginFailureDelay = loginFailureDelay;
+	}
+
+	/**
+	 * @return how symbolic links inside a user's root are treated (default STRICT).
+	 */
+	public SymlinkPolicy getSymlinkPolicy() {
+		return symlinkPolicy;
+	}
+
+	/**
+	 * @param policy STRICT (default): links out of the root are refused;
+	 * ALLOWED_TARGETS: links may lead into {@link #setAllowedLinkTargets(java.util.List)};
+	 * FOLLOW: every link in the root is followed. Takes effect on the next command.
+	 */
+	public void setSymlinkPolicy(SymlinkPolicy policy) {
+		if( policy == null ) {
+			throw new IllegalArgumentException("policy must not be null");
+		}
+		this.symlinkPolicy = policy;
+	}
+
+	/**
+	 * @return the directories links may lead into with SymlinkPolicy.ALLOWED_TARGETS.
+	 */
+	public java.util.List<String> getAllowedLinkTargets() {
+		return allowedLinkTargets;
+	}
+
+	/**
+	 * @param targets directories (paths in the server's file system) that symbolic links
+	 * inside a user's root may lead into when the policy is ALLOWED_TARGETS.
+	 */
+	public void setAllowedLinkTargets(java.util.List<String> targets) {
+		java.util.List<String> copy = new java.util.ArrayList<String>();
+		if( targets != null ) {
+			for(String t : targets) {
+				if( t != null && !t.trim().isEmpty() ) {
+					copy.add(t.trim());
+				}
+			}
+		}
+		this.allowedLinkTargets = java.util.Collections.unmodifiableList(copy);
+	}
+
+	private static java.util.List<String> parseTargets(String value) {
+		java.util.List<String> ret = new java.util.ArrayList<String>();
+		for(String t : value.split(",")) {
+			if( !t.trim().isEmpty() ) {
+				ret.add(t.trim());
+			}
+		}
+		return java.util.Collections.unmodifiableList(ret);
 	}
 
 	public FileSourceFactory getFileSourceFactory() {

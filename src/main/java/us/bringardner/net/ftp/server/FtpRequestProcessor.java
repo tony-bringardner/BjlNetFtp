@@ -56,6 +56,7 @@ import us.bringardner.io.filesource.FileSource;
 import us.bringardner.io.filesource.FileSourceFactory;
 import us.bringardner.net.framework.server.AbstractCommandProcessor;
 import us.bringardner.net.framework.server.IPrincipal;
+import us.bringardner.net.framework.server.IServer;
 import us.bringardner.net.ftp.FTP;
 
 /**
@@ -140,6 +141,8 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	private Map<String, Object> tempStorage = new HashMap<String, Object>();  
 
 	private String rootName ;
+	/** The root's absolute path with "." and ".." resolved lexically (symbolic links NOT resolved) */
+	private String rootAbsolute;
 	private int rootNameLen = 0;
 	private FileSource ftpRoot ;
 	private FileSource currentDir ;
@@ -192,6 +195,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			rootName = "Undefined";
 		}
 		rootNameLen = rootName.length();
+		rootAbsolute = normalize(ftpRoot.getAbsolutePath());
 
 		setCurrentDir(ftpRoot);
 	}
@@ -290,7 +294,9 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			boolean isAbsolute = path.startsWith("/") || path.startsWith("\\");
 			Deque<String> segments = new ArrayDeque<String>();
 			if( !isAbsolute ) {
-				String cwd = getDisplayFileName(getCurrentDir().getCanonicalPath());
+				// The client's view of the current directory (not its canonical path,
+				// which is outside the root when the directory was reached through a link)
+				String cwd = getVirtualPath(getCurrentDir());
 				addSegments(segments, cwd);
 			}
 			addSegments(segments, path);
@@ -332,32 +338,134 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 	/**
-	 * @return true if file is the user's FTP root or inside it, comparing canonical paths
-	 * (so neither ".." nor a symbolic link can escape the root).
+	 * @return true if the client may use this file: it must be inside the user's root on
+	 * the virtual (lexical) path, and, depending on {@link FtpServer.SymlinkPolicy}, where it
+	 * really is (its canonical path, with symbolic links resolved) must be allowed too:
+	 * <ul>
+	 * <li>STRICT (default): the canonical path must be inside the root, so a link cannot
+	 *     lead outside it.</li>
+	 * <li>ALLOWED_TARGETS: the canonical path must be inside the root or inside one of
+	 *     the server's allowedLinkTargets.</li>
+	 * <li>FOLLOW: any link inside the root is followed.</li>
+	 * </ul>
+	 * In every mode ".." cannot leave the root, and the root itself may be a link.
 	 */
 	public boolean isInsideRoot(FileSource file) {
 		if( file == null || rootName == null ) {
 			return false;
 		}
 		try {
-			String path = file.getCanonicalPath();
-			if( path.equals(rootName) ) {
-				return true;
-			}
-			if( !path.startsWith(rootName) ) {
+			// 1. Lexically inside the root (".." resolved, links not followed)
+			String lexical = normalize(file.getAbsolutePath());
+			if( relativeTo(lexical, rootAbsolute) == null && relativeTo(lexical, normalize(rootName)) == null ) {
 				return false;
 			}
-			char last = rootName.charAt(rootName.length()-1);
-			if( last == '/' || last == '\\' ) {
+			FtpServer.SymlinkPolicy policy = getSymlinkPolicy();
+			if( policy == FtpServer.SymlinkPolicy.FOLLOW ) {
 				return true;
 			}
-			// Must be followed by a separator: /ftp/root2 is NOT inside /ftp/root
-			char next = path.charAt(rootName.length());
-			return next == '/' || next == '\\';
+			// 2. Where it really is
+			String canonical = normalize(file.getCanonicalPath());
+			if( relativeTo(canonical, normalize(rootName)) != null ) {
+				return true;
+			}
+			if( policy == FtpServer.SymlinkPolicy.ALLOWED_TARGETS ) {
+				for(String target : allowedTargetsCanonical()) {
+					if( relativeTo(canonical, target) != null ) {
+						return true;
+					}
+				}
+			}
+			return false;
 		} catch (IOException e) {
 			logError("Can't resolve "+file, e);
 			return false;
 		}
+	}
+
+	private FtpServer.SymlinkPolicy getSymlinkPolicy() {
+		IServer server = getServer();
+		return server instanceof FtpServer ? ((FtpServer)server).getSymlinkPolicy() : FtpServer.SymlinkPolicy.STRICT;
+	}
+
+	private java.util.List<String> allowedTargetsCanonical() throws IOException {
+		java.util.List<String> ret = new java.util.ArrayList<String>();
+		IServer server = getServer();
+		if( !(server instanceof FtpServer) ) {
+			return ret;
+		}
+		for(String t : ((FtpServer)server).getAllowedLinkTargets()) {
+			FileSource dir = getFactory().createFileSource(t);
+			ret.add(normalize(dir.getCanonicalPath()));
+		}
+		return ret;
+	}
+
+	/**
+	 * @return the path the client sees for this file ("/" is the user's root), built from
+	 * its lexical path so a directory reached through a symbolic link shows as the link's
+	 * name, never as the server's real path.
+	 */
+	public String getVirtualPath(FileSource file) {
+		if( file == null ) {
+			return "/";
+		}
+		String rel = relativeTo(normalize(file.getAbsolutePath()), rootAbsolute);
+		if( rel == null && rootName != null ) {
+			rel = relativeTo(normalize(file.getAbsolutePath()), normalize(rootName));
+			if( rel == null ) {
+				try {
+					rel = relativeTo(normalize(file.getCanonicalPath()), normalize(rootName));
+				} catch (IOException e) {
+					rel = null;
+				}
+			}
+		}
+		if( rel == null ) {
+			// Never show a path outside the root
+			logInfo("No virtual path for "+file);
+			return "/";
+		}
+		return "/"+rel;
+	}
+
+	/**
+	 * Resolve "." and ".." lexically and use "/" separators. Keeps a leading "/" or drive.
+	 */
+	static String normalize(String path) {
+		if( path == null ) {
+			return null;
+		}
+		String p = path.replace('\\', '/');
+		String prefix = "";
+		if( p.startsWith("//") ) {
+			prefix = "//"; // UNC
+			p = p.substring(2);
+		} else if( p.startsWith("/") ) {
+			prefix = "/";
+			p = p.substring(1);
+		} else if( p.length() > 1 && p.charAt(1) == ':' ) {
+			prefix = p.substring(0, 2)+"/";
+			p = p.length() > 3 ? p.substring(3) : "";
+		}
+		Deque<String> segs = new ArrayDeque<String>();
+		addSegments(segs, p);
+		return prefix + String.join("/", segs);
+	}
+
+	/**
+	 * @return path relative to root (without a leading "/", "" for the root itself),
+	 * or null if path is not root or below it. Compares whole path elements.
+	 */
+	static String relativeTo(String path, String root) {
+		if( path == null || root == null ) {
+			return null;
+		}
+		if( path.equals(root) ) {
+			return "";
+		}
+		String prefix = root.endsWith("/") ? root : root+"/";
+		return path.startsWith(prefix) ? path.substring(prefix.length()) : null;
 	}
 
 	public FileSource getCurrentDir() {

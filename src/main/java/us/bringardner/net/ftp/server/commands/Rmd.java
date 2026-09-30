@@ -81,7 +81,7 @@ public class Rmd extends BaseCommand  implements FtpCommand {
 			processor.reply(REPLY_550_ACTION_NOT_TAKEN," Invalid name");
 			return;
 		}
-		commandLine = processor.getDisplayFileName(target.toString());
+		commandLine = processor.getVirtualPath(target);
 		
 		if( !target.isDirectory()){
 			processor.reply(REPLY_450_FILE_ACTION_FAILED," Invalid or non existant name");

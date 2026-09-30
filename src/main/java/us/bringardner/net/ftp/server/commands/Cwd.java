@@ -81,10 +81,10 @@ public class Cwd extends BaseCommand  implements FtpCommand {
 		
 		if(dir == null || !dir.isDirectory()) {
 			//Not a valid path
-			processor.reply(REPLY_450_FILE_ACTION_FAILED, "\"" + processor.getDisplayFileName(processor.getCurrentDir().getCanonicalPath())+"\" is the current directory");
+			processor.reply(REPLY_450_FILE_ACTION_FAILED, "\"" + processor.getVirtualPath(processor.getCurrentDir())+"\" is the current directory");
 		} else {			
 				processor.setCurrentDir(dir);
-				processor.reply(REPLY_250_FILE_ACTION_OK, "\"" +processor.getDisplayFileName(dir.getCanonicalPath())+"\" is the current directory");
+				processor.reply(REPLY_250_FILE_ACTION_OK, "\"" +processor.getVirtualPath(dir)+"\" is the current directory");
 		}
 
 	}

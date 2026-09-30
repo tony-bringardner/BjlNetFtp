@@ -68,8 +68,7 @@ public class Pwd extends BaseCommand  implements FtpCommand {
 	 */
 	public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
 		FileSource dir = processor.getCurrentDir();
-		String dirName = dir.getCanonicalPath();
-		dirName = processor.getDisplayFileName(dirName);
+		String dirName = processor.getVirtualPath(dir);
 		processor.reply(REPLY_257_PATHNAME_CREATED,"\""+dirName+"\" is the current directory");
 	}
 

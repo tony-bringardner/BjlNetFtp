@@ -86,7 +86,7 @@ public class Dele extends BaseCommand implements FtpCommand {
 				 || !dest.exists()) {
 			processor.reply(REPLY_450_FILE_ACTION_FAILED,"Invalid or non existing file");
 		} else {			
-			name = processor.getDisplayFileName(dest.toString());
+			name = processor.getVirtualPath(dest);
 			if( dest.delete() ) {
 				if(cwd.equals(dest)) {
 					// we just deleted the cwd

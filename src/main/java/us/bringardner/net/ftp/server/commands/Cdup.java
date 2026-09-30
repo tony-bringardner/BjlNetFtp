@@ -71,11 +71,11 @@ public class Cdup extends BaseCommand implements FtpCommand {
 	public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
 		FileSource cur = processor.getCurrentDir();
 		FileSource parent = cur.getParentFile();
-		FileSource top = processor.getFtpRoot();
 		
-		if( parent != null && !cur.getCanonicalPath().equals(top.getCanonicalPath()) && processor.isInsideRoot(parent)){
+		// Compare virtual paths: the current directory may have been reached through a link
+		if( parent != null && !processor.getVirtualPath(cur).equals("/") && processor.isInsideRoot(parent)){
 			processor.setCurrentDir(parent);
-			String display = processor.getDisplayFileName(processor.getCurrentDir().getCanonicalPath());
+			String display = processor.getVirtualPath(processor.getCurrentDir());
 			processor.reply(REPLY_250_FILE_ACTION_OK,"Current dir is "+display);
 		} else {
 			processor.reply(REPLY_450_FILE_ACTION_FAILED,"Parrent is not availible");

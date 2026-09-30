@@ -26,12 +26,20 @@ Each setting can be passed as a system property or set with the matching `FtpSer
 | `JFtp.minControlPort` / `JFtp.maxControlPort` | 10333 / 65333 | Passive (PASV/EPSV) port range; busy ports are skipped |
 | `JFtp.externalAddress` | control connection address | Address advertised in PASV replies (for NAT) |
 | `JFtp.allowForeignDataAddress` | false | Allow PORT/EPRT to other hosts or ports below 1024, and PASV connections from other hosts (needed only for FXP). `setAllowForeignDataAddress()` |
+| `JFtp.symlinkPolicy` | `strict` | How symbolic links inside a user's root are treated: `strict`, `allowedTargets` or `follow` (see below). `setSymlinkPolicy()` |
+| `JFtp.allowedLinkTargets` | none | Comma-separated directories that links may lead into when the policy is `allowedTargets`. `setAllowedLinkTargets()` |
 | `JFtp.loginFailureDelay` | 1000 ms | Delay before replying to a failed PASS/ACCT. `setLoginFailureDelay()` |
 | `JavaFtpServer.linger` | off | SO_LINGER (seconds) for data connections |
 
 ### Behaviour notes
 
-- **Paths are confined to the user's root.** `..` stops at `/`, as in a chroot, and symbolic links that point outside the root are rejected.
+- **Paths are confined to the user's root.** `..` stops at `/`, as in a chroot, in every mode.
+- **Symbolic links** inside a root are handled according to `JFtp.symlinkPolicy`:
+  - `strict` (default): a link that leads outside the root is refused, so it can't be used to reach other files.
+  - `allowedTargets`: links may lead outside the root only into the directories listed in `JFtp.allowedLinkTargets`, e.g. to share `/data/shared` in every user's root.
+  - `follow`: every link inside the root is followed. Use it only when users can't create links by other means (shell, SFTP, Samba, unpacked archives).
+
+  Clients always see the link's own path (`/shared`), never the server's real path. Hard links need no setting; they are ordinary files inside the root.
 - **STOR is safe to retry.** Data is written to a hidden temporary file (`.name.<id>.ftp-part`), which replaces the target only when the upload completes. APPE and STOR after REST append in place.
 - **Transfer replies:**
   - A successful transfer gets `150` then `226`.
