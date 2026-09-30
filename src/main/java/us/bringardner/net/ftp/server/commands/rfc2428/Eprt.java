@@ -207,6 +207,12 @@ public class Eprt extends BaseCommand implements FtpCommand {
 			return;
 		}
 
+		String rejected = processor.checkActiveTarget(addr, port);
+		if( rejected != null ) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,rejected);
+			return;
+		}
+
 		// Close any previous passive/active data connection
 		processor.setPasvSocket(null);
 		try	{

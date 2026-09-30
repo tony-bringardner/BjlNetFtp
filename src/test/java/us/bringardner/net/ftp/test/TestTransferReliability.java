@@ -471,8 +471,12 @@ public class TestTransferReliability {
 		private final Writer out;
 
 		Session() throws IOException {
+			this(PORT);
+		}
+
+		Session(int port) throws IOException {
 			control = new Socket();
-			control.connect(new InetSocketAddress("127.0.0.1", PORT), 5000);
+			control.connect(new InetSocketAddress("127.0.0.1", port), 5000);
 			control.setSoTimeout(10000);
 			in = new BufferedReader(new InputStreamReader(control.getInputStream(), StandardCharsets.UTF_8));
 			out = new OutputStreamWriter(control.getOutputStream(), StandardCharsets.UTF_8);

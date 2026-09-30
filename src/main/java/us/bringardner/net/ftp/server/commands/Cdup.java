@@ -73,7 +73,7 @@ public class Cdup extends BaseCommand implements FtpCommand {
 		FileSource parent = cur.getParentFile();
 		FileSource top = processor.getFtpRoot();
 		
-		if( parent != null && parent.getCanonicalPath().startsWith(top.getCanonicalPath())){
+		if( parent != null && !cur.getCanonicalPath().equals(top.getCanonicalPath()) && processor.isInsideRoot(parent)){
 			processor.setCurrentDir(parent);
 			String display = processor.getDisplayFileName(processor.getCurrentDir().getCanonicalPath());
 			processor.reply(REPLY_250_FILE_ACTION_OK,"Current dir is "+display);

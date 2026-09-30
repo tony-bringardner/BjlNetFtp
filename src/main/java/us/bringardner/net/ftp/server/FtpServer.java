@@ -88,10 +88,16 @@ public class FtpServer extends Server {
 	/** Default timeout (ms) for connecting to the client in active mode (PORT/EPRT) */
 	public static final int DEFAULT_CONNECT_TIMEOUT = 15 * 1000;
 	public static final String CONNECT_TIMEOUT_PROP = FTP_NAME+".connectTimeout";
+	/**
+	 * If "true", PORT/EPRT may name any address/port and PASV accepts a data connection from any
+	 * address (needed for FXP / server-to-server transfers). Default false (RFC 2577 protections).
+	 */
+	public static final String ALLOW_FOREIGN_DATA_ADDRESS_PROP = FTP_NAME+".allowForeignDataAddress";
 
 	private volatile int bufferSize = Integer.getInteger(BUFFER_SIZE_PROP, DEFAULT_BUFFER_SIZE);
 	private volatile int dataTimeout = Integer.getInteger(DATA_TIMEOUT_PROP, DEFAULT_DATA_TIMEOUT);
 	private volatile int connectTimeout = Integer.getInteger(CONNECT_TIMEOUT_PROP, DEFAULT_CONNECT_TIMEOUT);
+	private volatile boolean allowForeignDataAddress = Boolean.getBoolean(ALLOW_FOREIGN_DATA_ADDRESS_PROP);
 	private FileSource ftpRoot;
 	//private boolean useJdbc = false;
 	private FileSourceFactory factory = FileSourceFactory.getDefaultFactory();
@@ -368,6 +374,23 @@ public class FtpServer extends Server {
 			throw new IllegalArgumentException("connectTimeout must be > 0");
 		}
 		this.connectTimeout = connectTimeout;
+	}
+
+	/**
+	 * @return true if data connections may use an address other than the client's
+	 * control connection address (FXP). Default false.
+	 */
+	public boolean isAllowForeignDataAddress() {
+		return allowForeignDataAddress;
+	}
+
+	/**
+	 * RFC 2577: by default PORT/EPRT must name the client's own address and a port >= 1024,
+	 * and a passive data connection must come from the client's address. This prevents
+	 * "FTP bounce" attacks and data connection theft. Set true only for FXP.
+	 */
+	public void setAllowForeignDataAddress(boolean allow) {
+		this.allowForeignDataAddress = allow;
 	}
 
 	public FileSourceFactory getFileSourceFactory() {

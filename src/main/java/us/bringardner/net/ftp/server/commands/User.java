@@ -85,6 +85,9 @@ public class User  extends NoAuthReqBaseCommand {
 		}
 		
 				
+		// RFC 959: USER flushes any user, password, and account information already supplied
+		processor.removeTempValue(PASS);
+		processor.removeTempValue(ACCT);
 		String user = context.getNextToken();
 		if( context.hasNext()) {
 			String nxt = context.getNextToken();

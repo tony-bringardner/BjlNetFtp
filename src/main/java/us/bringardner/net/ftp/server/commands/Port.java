@@ -108,6 +108,12 @@ public class Port extends BaseCommand implements FtpCommand {
 		}
 		InetAddress addr = InetAddress.getByAddress(new byte[] {(byte)v[0],(byte)v[1],(byte)v[2],(byte)v[3]});
 
+		String rejected = processor.checkActiveTarget(addr, port);
+		if( rejected != null ) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,rejected);
+			return;
+		}
+
 		// Close any previous passive/active data connection
 		processor.setPasvSocket(null);
 		try	{

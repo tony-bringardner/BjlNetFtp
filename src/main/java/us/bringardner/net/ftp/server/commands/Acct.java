@@ -88,11 +88,18 @@ public class Acct  extends NoAuthReqBaseCommand {
 
 		if( args.length != 2 ) {
 			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Not enough parameters");
+			return;
 		}
 		
 		processor.setTempValue(ACCT, args[1]);
 		
-		if(  processor.authenticate((String) processor.getTempValue(PASS)) ){
+		// The password is kept only between PASS and ACCT, and can be used once.
+		String pw = (String) processor.removeTempValue(PASS);
+		if( pw == null ) {
+			processor.reply(REPLY_503_BAD_SEQ_OF_COMMANDS,"Login with USER and PASS first");
+			return;
+		}
+		if(  processor.authenticate(pw) ){
 			processor.reply(REPLY_230_USER_LOGGED_IN,"user authenticated");
 		} else {
 			processor.reply(REPLY_530_USER_NOT_LOGGED_IN,"user not authenticated");

@@ -41,6 +41,8 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -258,34 +260,103 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 
-	/*
-	 * Only creates files that are valid in the context of
-	 * the ftpRoot.
-	 * 1>  Path is converted from a relative path to absolute (if required)
-	 * 2>  Check to ensure the flie is under the ftpRoot.
+	/**
+	 * Resolve a client supplied path to a file inside the user's FTP root.
+	 * <p>
+	 * The path is treated as a virtual path: absolute paths start at the user's root,
+	 * relative paths start at the current directory, and "." / ".." are resolved lexically
+	 * with ".." at the root staying at the root (chroot semantics). The result is then
+	 * checked with canonical paths, which also rejects symbolic links that point outside
+	 * the root.
+	 * 
+	 * @return the file, or null if the path is invalid or outside the user's root.
 	 */
 	public FileSource createNewFile(String path){
-		FileSource ret = null;
+		if( path == null ) {
+			return null;
+		}
 		try {
 			FileSource root = getFtpRoot();
 			path = path.trim();
-			int sz = path.length();
-			boolean isRelative = sz==0 || (path.charAt(0) != '/' && (sz > 1 && path.charAt(1)!=':'));
-
-			if( isRelative ){
-				FileSource cwd = getCurrentDir();
-				ret = cwd.getChild(path);				
-			} else {
-				if( path.startsWith("/")) {
-					path = path.substring(1);
-				}
-				ret = root.getChild(path); 
+			if( path.indexOf('\0') >= 0 ) {
+				return null;
 			}
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+			// Windows drive letters (C:...) are never valid virtual paths
+			if( path.length() > 1 && path.charAt(1) == ':' ) {
+				return null;
+			}
 
-		return ret;
+			boolean isAbsolute = path.startsWith("/") || path.startsWith("\\");
+			Deque<String> segments = new ArrayDeque<String>();
+			if( !isAbsolute ) {
+				String cwd = getDisplayFileName(getCurrentDir().getCanonicalPath());
+				addSegments(segments, cwd);
+			}
+			addSegments(segments, path);
+
+			if( segments.isEmpty() ) {
+				return root;
+			}
+			StringBuilder rel = new StringBuilder();
+			for(String seg : segments) {
+				if( rel.length() > 0 ) {
+					rel.append('/');
+				}
+				rel.append(seg);
+			}
+			FileSource ret = root.getChild(rel.toString());
+			if( !isInsideRoot(ret) ) {
+				logInfo("Rejected path outside of root: "+path);
+				return null;
+			}
+			return ret;
+		} catch (IOException e) {
+			logError("Error resolving path "+path, e);
+			return null;
+		}
+	}
+
+	private static void addSegments(Deque<String> segments, String path) {
+		for(String seg : path.split("[/\\\\]+")) {
+			if( seg.isEmpty() || seg.equals(".")) {
+				continue;
+			}
+			if( seg.equals("..")) {
+				// ".." at the root stays at the root
+				segments.pollLast();
+			} else {
+				segments.addLast(seg);
+			}
+		}
+	}
+
+	/**
+	 * @return true if file is the user's FTP root or inside it, comparing canonical paths
+	 * (so neither ".." nor a symbolic link can escape the root).
+	 */
+	public boolean isInsideRoot(FileSource file) {
+		if( file == null || rootName == null ) {
+			return false;
+		}
+		try {
+			String path = file.getCanonicalPath();
+			if( path.equals(rootName) ) {
+				return true;
+			}
+			if( !path.startsWith(rootName) ) {
+				return false;
+			}
+			char last = rootName.charAt(rootName.length()-1);
+			if( last == '/' || last == '\\' ) {
+				return true;
+			}
+			// Must be followed by a separator: /ftp/root2 is NOT inside /ftp/root
+			char next = path.charAt(rootName.length());
+			return next == '/' || next == '\\';
+		} catch (IOException e) {
+			logError("Can't resolve "+file, e);
+			return false;
+		}
 	}
 
 	public FileSource getCurrentDir() {
@@ -293,8 +364,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 	public void setCurrentDir(FileSource newDir) throws IOException {
-		FileSource root = getFtpRoot();
-		if( !root.isChildOfMine(newDir)) {
+		if( !isInsideRoot(newDir)) {
 			throw new SecurityException("Invalid directory "+newDir);
 		}
 		if( !newDir.isDirectory() ) {
@@ -913,6 +983,57 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			}
 			throw e;
 		}
+	}
+
+	/**
+	 * RFC 2577 checks for an active mode (PORT/EPRT) target.
+	 * 
+	 * @return null if the target is allowed, otherwise the reason it is not.
+	 */
+	public String checkActiveTarget(InetAddress addr, int port) {
+		if( ((FtpServer)getServer()).isAllowForeignDataAddress() ) {
+			return null;
+		}
+		InetAddress peer = getConnection().getSocket().getInetAddress();
+		if( !isSameHost(addr, peer) ) {
+			return "Data connection address must match the client address";
+		}
+		if( port < 1024 ) {
+			return "Data connection port must be 1024 or higher";
+		}
+		return null;
+	}
+
+	/**
+	 * @return true if a passive data connection from this address should be accepted.
+	 */
+	public boolean isAllowedPassivePeer(InetAddress addr) {
+		if( ((FtpServer)getServer()).isAllowForeignDataAddress() ) {
+			return true;
+		}
+		return isSameHost(addr, getConnection().getSocket().getInetAddress());
+	}
+
+	static boolean isSameHost(InetAddress a, InetAddress b) {
+		if( a == null || b == null ) {
+			return false;
+		}
+		return java.util.Arrays.equals(normalize(a), normalize(b));
+	}
+
+	// IPv4-mapped IPv6 (::ffff:a.b.c.d) compares equal to the IPv4 address
+	private static byte[] normalize(InetAddress a) {
+		byte [] b = a.getAddress();
+		if( b.length == 16 ) {
+			boolean mapped = true;
+			for(int i=0; i < 10 && mapped; i++ ) {
+				mapped = b[i] == 0;
+			}
+			if( mapped && (b[10]&0xff) == 0xff && (b[11]&0xff) == 0xff ) {
+				return new byte[] {b[12],b[13],b[14],b[15]};
+			}
+		}
+		return b;
 	}
 
 	/**

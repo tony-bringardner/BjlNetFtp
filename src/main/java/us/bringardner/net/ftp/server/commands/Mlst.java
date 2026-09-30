@@ -186,7 +186,7 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 	}
 
 	public static String formatPerms(FileSource file, FtpRequestProcessor processor) throws IOException {
-		if(!processor.getFtpRoot().isChildOfMine(file)) {
+		if(!processor.isInsideRoot(file)) {
 			return "";
 		}else if( file.isDirectory()){
 			return formatDirPerms(file,processor);
@@ -283,7 +283,7 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 		   the CDUP command may succeed (if this particular pathname is the one
 		   to which a CDUP would apply.)
 			 */
-			if(processor.getFtpRoot().isChildOfMine(file.getParentFile())){
+			if(processor.isInsideRoot(file.getParentFile())){
 				ret.append('e');
 			}
 

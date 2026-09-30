@@ -160,7 +160,27 @@ public  class PassiveSocket {
 			return dataSocket;
 		}
 		try {
-			dataSocket = serverSocket.accept();
+			int timeout = serverSocket.getSoTimeout();
+			long deadline = System.currentTimeMillis() + timeout;
+			while( dataSocket == null ) {
+				Socket s = serverSocket.accept();
+				if( processor.isAllowedPassivePeer(s.getInetAddress()) ) {
+					dataSocket = s;
+				} else {
+					// RFC 2577: don't let a third party steal the data connection
+					processor.logInfo("Rejected passive data connection from "+s.getInetAddress().getHostAddress()
+							+" (control connection is from "+processor.getConnection().getSocket().getInetAddress().getHostAddress()+")");
+					try {
+						s.close();
+					} catch (IOException e) {
+					}
+					long remaining = deadline - System.currentTimeMillis();
+					if( remaining <= 0 ) {
+						throw new SocketTimeoutException("No valid passive data connection");
+					}
+					serverSocket.setSoTimeout((int)remaining);
+				}
+			}
 			dataSocket.setSoTimeout(processor.getActivityTimeOut());
 		} catch (SocketTimeoutException e) {
 			processor.logDebug("Timed out waiting for passive data connection on port "+port);

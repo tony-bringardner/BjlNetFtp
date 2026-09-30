@@ -518,13 +518,38 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * @throws IOException
 	 */
 	public void writeLine(String line) throws IOException {
-		logDebug(
-				""+Thread.currentThread().hashCode()+" Write:"+line
-				);
+		String safe = maskCredentials(line);
+		if( isDebugEnabled() ) {
+			logDebug(""+Thread.currentThread().hashCode()+" Write:"+safe);
+		}
 		CRLFLineWriter out = getOutput();
 		out.writeLine(line);
 		out.flush();
-		dialog.append(""+Thread.currentThread().hashCode()+" Write:"+line+"\n");
+		appendDialog(" Write:"+safe);
+	}
+
+	/** Maximum number of characters kept in {@link #dialog}. */
+	public static final int MAX_DIALOG_SIZE = 64 * 1024;
+
+	/**
+	 * Replace the argument of a PASS command so passwords never reach logs or the dialog.
+	 */
+	static String maskCredentials(String line) {
+		if( line != null && line.length() >= 4 && line.regionMatches(true, 0, PASS, 0, 4)
+				&& (line.length() == 4 || line.charAt(4) == ' ') ) {
+			return PASS+" ****";
+		}
+		return line;
+	}
+
+	private void appendDialog(String text) {
+		synchronized (dialog) {
+			dialog.append(Thread.currentThread().hashCode()).append(text).append('\n');
+			if( dialog.length() > MAX_DIALOG_SIZE ) {
+				// keep the most recent half
+				dialog.delete(0, dialog.length() - MAX_DIALOG_SIZE/2);
+			}
+		}
 	}
 
 	/**
@@ -534,8 +559,10 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 */
 	protected String readLine() throws IOException {
 		String ret = getInput().readLine();
-		logDebug(""+Thread.currentThread().hashCode()+" Read: "+ret);
-		dialog.append(""+Thread.currentThread().hashCode()+" Read: "+ret+"\n");
+		if( isDebugEnabled() ) {
+			logDebug(""+Thread.currentThread().hashCode()+" Read: "+ret);
+		}
+		appendDialog(" Read: "+ret);
 		return ret;
 	}
 
@@ -644,7 +671,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 			this.userId = userId;
 			this.password = passwd;
 			this.account = account;
-			logDebug("userid="+userId+" password = "+passwd+" account="+account);
+			logDebug("userid="+userId+" account="+account);
 
 			// connecting a socket will trigger the server to send us a greeting line
 			ClientFtpResponse res = readResponse();
