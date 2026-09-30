@@ -142,12 +142,18 @@ public class FtpServer extends Server {
 			getLogger().setLevel(logLevel);
 		}
 
+		/**
+		 * The server's one TLS context, whatever the AUTH mechanism (TLS, SSL...).
+		 * Data connections use it too, so they can resume the control connection's session
+		 * (sessions are kept per context). It used to build a new context under the AUTH
+		 * name ("TLS") whenever that differed from the configured protocol (e.g.
+		 * FtpServer.Protocol=TLSv1.3): a new context (and keystore load) for every AUTH, the
+		 * first data connection could never resume the control session, and control and
+		 * data could negotiate different TLS versions (BJL-18).
+		 */
 		@Override
 		public SSLContext getSSLContext(String sslOrTsl) throws IOException {
-			// Server.getSSLContext(String) builds the context under a lock. The old code
-			// swapped the server's shared protocol field with no lock, so two clients
-			// running AUTH at the same time could interfere with each other.
-			return FtpServer.this.getSSLContext(sslOrTsl);
+			return FtpServer.this.getSSLContext();
 		}
 		
 	}

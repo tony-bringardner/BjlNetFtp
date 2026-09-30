@@ -40,8 +40,6 @@ import java.net.SocketException;
 import java.net.UnknownHostException;
 
 import javax.net.SocketFactory;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 
 import us.bringardner.core.BaseObject;
 import us.bringardner.net.ftp.FTP;
@@ -128,6 +126,22 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 	}
 
 
+	/**
+	 * Call before sending the transfer command (LIST, NLST, MLSD, RETR, STOR, APPE).
+	 * <p>
+	 * Passive mode: connect now. Servers such as vsftpd wait for the data connection
+	 * before they send the 1xx reply.<br>
+	 * Active mode: do nothing. The server connects only after it accepts the command
+	 * (RFC 959), so the connection is accepted after the 1xx reply, by
+	 * {@link #getInput()} or {@link #getOutput()}. Accepting before sending the command
+	 * deadlocks with servers such as vsftpd.
+	 */
+	public void connectBeforeCommand() throws IOException {
+		if( passive ) {
+			getSocket();
+		}
+	}
+
 	/** Active mode listener, bound before PORT/EPRT is sent. */
 	private volatile ServerSocket listener;
 
@@ -151,14 +165,8 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 			Socket ret = svr.accept();
 			ret.setSoTimeout(client.getTransferTimeout());
 			if( client.isDataChannelSecure() ) {
-				SocketFactory f = client.getSocketFactory();
-				if( f instanceof SSLSocketFactory ) {
-					SSLSocket ssl = (SSLSocket) ((SSLSocketFactory) f).createSocket(ret,
-							ret.getInetAddress().getHostAddress(), ret.getPort(), true);
-					ssl.setUseClientMode(true);
-					ssl.setSoTimeout(client.getTransferTimeout());
-					ret = ssl;
-				}
+				// resumes the control connection's TLS session (BJL-18)
+				ret = client.secureDataSocket(ret);
 			}
 			return ret;
 		} finally {
@@ -180,14 +188,12 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 	
 	private Socket getClientSocket() throws UnknownHostException, IOException {
 		FtpClient client = getClient();
-		SocketFactory factory = client.getDataSocketFactory();
-		// Create unconnected so buffer sizes apply to the connection (they must be set
-		// before connect for TCP window scaling) and so we can use a connect timeout.
-		Socket ret = factory.createSocket();
+		// Plain TCP first; TLS is added once connected so it can resume the control
+		// connection's session (BJL-18). Created unconnected so buffer sizes apply to the
+		// connection (they must be set before connect for TCP window scaling) and so we can
+		// use a connect timeout.
+		Socket ret = SocketFactory.getDefault().createSocket();
 		try {
-			if (ret instanceof SSLSocket ) {
-				((SSLSocket)ret).setUseClientMode(true);
-			}
 			int bufSz = client.getTransferBufferSize();
 			if( bufSz > 0 ) {
 				ret.setReceiveBufferSize(bufSz);
@@ -196,6 +202,9 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 			ret.setTcpNoDelay(true);
 			ret.connect(new InetSocketAddress(getHost(), getPort()), client.getTransferTimeout());
 			ret.setSoTimeout(client.getTransferTimeout());
+			if( client.isDataChannelSecure() ) {
+				ret = client.secureDataSocket(ret);
+			}
 		} catch (IOException e) {
 			try {
 				ret.close();

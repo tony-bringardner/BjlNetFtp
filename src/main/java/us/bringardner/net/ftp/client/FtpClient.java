@@ -49,6 +49,7 @@ import java.util.Map;
 import javax.net.ServerSocketFactory;
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -1105,6 +1106,27 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	}
 
 	/**
+	 * Puts TLS on a connected data socket, as the TLS client (RFC 4217), so that it resumes
+	 * the control connection's TLS session, which RFC 4217 recommends and servers such as
+	 * vsftpd (require_ssl_reuse) and FileZilla Server require (BJL-18).
+	 * <p>
+	 * Java looks a client session up by host and port. An SSLSocket always uses the port it
+	 * is connected to (the data port), so it never found the control session; an SSLEngine
+	 * uses the host and port it is created with, so the data connection runs through one
+	 * created with the control connection's. It must come from the control connection's
+	 * SSLContext, which holds the session.
+	 *
+	 * @param plain a connected, plain data socket; closed with the returned socket
+	 * @return the TLS socket; the handshake happens on first use
+	 */
+	public Socket secureDataSocket(Socket plain) throws IOException {
+		SSLEngine engine = getSSLContext().createSSLEngine(getHost(), getPort());
+		SslEngineSocket ssl = new SslEngineSocket(plain, engine);
+		ssl.setSoTimeout(plain.getSoTimeout());
+		return ssl;
+	}
+
+	/**
 	 * @return the ServerSocketFactory for active data connections.
 	 */
 	public ServerSocketFactory getDataServerSocketFactory() throws IOException {
@@ -1240,12 +1262,15 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		String [] ret = null;
 
 		ClientDataTransferProcess dtp = getDataTransferProcess();
-		CRLFLineReader in = new CRLFLineReader(dtp.getInput());
+		CRLFLineReader in = null;
 		try {
+			dtp.connectBeforeCommand();
 			ClientFtpResponse res = sendMlsdOrList(dirPath, useList);
 
 
 			if( res.isPositivePreliminay()) {
+				// Active mode accepts the server's connection here, after the 1xx reply
+				in = new CRLFLineReader(dtp.getInput());
 				String line = null;
 				List<String> list = new ArrayList<String>();
 				while((line=in.readLine()) != null) {
@@ -1267,10 +1292,14 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 				}
 			}
 		} finally {
-			try {
-				in.close();
-			} catch (Exception e) {
+			if( in != null ) {
+				try {
+					in.close();
+				} catch (Exception e) {
+				}
 			}
+			// releases the socket or active listener if the command was refused
+			dtp.close();
 		}
 		return ret;
 	}
@@ -1595,7 +1624,9 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		SSLContext ctx=getSSLContext();
 		SSLSocketFactory factory = ctx.getSocketFactory();
 
-		sslSocket = (SSLSocket)factory.createSocket(socket,null, socket.getPort(), false);
+		// With the host (it was null), Java caches the session under this host and port,
+		// which is what lets data connections resume it (see secureDataSocket, BJL-18)
+		sslSocket = (SSLSocket)factory.createSocket(socket,getHost(), socket.getPort(), false);
 		sslSocket.setWantClientAuth(false);
 		sslSocket.startHandshake();
 		channelSecure = true;

@@ -89,13 +89,22 @@ public class ClientFtpInputStream extends InputStream implements FTP {
 
         
         dtp = client.getDataTransferProcess();
-        // Buffered: read() on a raw socket stream is one system call per byte
-        in = new BufferedInputStream(dtp.getInput(), Math.max(8192, client.getTransferBufferSize()));
-        ClientFtpResponse res = client.executeCommand(RETR, path.trim());
+        ClientFtpResponse res;
+        try {
+            dtp.connectBeforeCommand();
+            res = client.executeCommand(RETR, path.trim());
+        } catch (IOException e) {
+            dtp.close();
+            throw e;
+        }
         
         if(!res.isPositivePreliminay()) {
+            dtp.close();
             throw new IOException ("Error invalid respones to RETR = "+res._getResponseCode());
         }
+        // Active mode accepts the server's connection here, after the 1xx reply.
+        // Buffered: read() on a raw socket stream is one system call per byte
+        in = new BufferedInputStream(dtp.getInput(), Math.max(8192, client.getTransferBufferSize()));
         
         if( startAt > 0l && !canRestore) {
             //  Server could not do it so ignore the startAt data

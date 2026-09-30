@@ -63,21 +63,22 @@ public class ClientFtpOutputStream extends OutputStream implements FTP {
         
         dtp = client.getDataTransferProcess();
 
+        String cmd = append ? APPE : STOR;
+        ClientFtpResponse res = null;
+        try {
+            dtp.connectBeforeCommand();
+            res = client.executeCommand(cmd, path);
+        } catch (IOException e) {
+            dtp.close();
+            throw e;
+        }
+        if( !res.isPositivePreliminay()) {
+            dtp.close();
+            throw new IOException ("Error invalid respones to "+cmd+" = "+res);
+        }
+        // Active mode accepts the server's connection here, after the 1xx reply.
         // Buffered: write(int) on a raw socket stream is one system call (and TCP packet) per byte
         out = new BufferedOutputStream(dtp.getOutput(), Math.max(8192, client.getTransferBufferSize()));
-        ClientFtpResponse res = null;
-        
-        if( append ) {
-            res = client.executeCommand(APPE, path);
-            if( !res.isPositivePreliminay()) {
-                throw new IOException ("Error invalid respones to APPE = "+res);
-            }
-        } else {
-            res = client.executeCommand(STOR, path);
-            if( !res.isPositivePreliminay()) {
-                throw new IOException ("Error invalid respones to STOR = "+res);
-            }
-        }
         
         closed = false;
     }
