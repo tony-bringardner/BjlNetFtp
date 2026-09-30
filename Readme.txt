@@ -21,21 +21,10 @@
  The NetFtp project provides an implementation for the FTP protocol (client and server).
  
  
- Requires Java 1.5 or greater
+ Requires Java 11 or greater (Maven 3.6.3 or greater to build).
  Dependencies:  
- 	Compile: 
- 			BjlCore
- 			BjlIo
- 			BjlFileSource
- 			BjlNetFramework
- 	
- 	Runtime: 
- 		Required:
- 			BjlCore
- 			BjlIo
- 			BjlFileSource
- 			BjlNetFramework
- 		Optional:
- 			log4j
- 	
+ 	bjl_file_system
+ 	bjl_net_framework
+ 	(these bring in bjl_core and bjl_io)
  
+ See README.md for build and configuration details.

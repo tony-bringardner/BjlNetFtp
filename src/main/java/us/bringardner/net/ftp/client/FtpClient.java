@@ -142,7 +142,21 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private boolean usePasvAddress = false;
 	private boolean active = false;
 	private boolean channelSecure;
-	public boolean forceList;
+	private volatile boolean forceList;
+
+	/**
+	 * @return true if directory listings always use LIST even when the server supports MLSD.
+	 */
+	public boolean isForceList() {
+		return forceList;
+	}
+
+	/**
+	 * @param forceList true to always use LIST instead of MLSD for directory listings.
+	 */
+	public void setForceList(boolean forceList) {
+		this.forceList = forceList;
+	}
 
 
 	/**
@@ -967,10 +981,10 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		return mlstSupported;
 	}
 
-	private ClientFtpResponse sendMlsdOrList(String dirPath) throws IOException {
+	private ClientFtpResponse sendMlsdOrList(String dirPath, boolean useList) throws IOException {
 		ClientFtpResponse ret = null;
 
-		if( !forceList && isMlstSupported() ) {
+		if( !useList && isMlstSupported() ) {
 			/*
 			 * MLST is the preferred method.  It is clear and platform independent.
 			 * If the server does not support MLST this will only exec once.
@@ -989,11 +1003,8 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 
 
 	public synchronized String[] executeList(boolean dontUseMlst, String dirPath) throws IOException {
-		boolean tmp= forceList;
-		forceList = dontUseMlst;
-		String ret [] = executeList(dirPath);
-		forceList = tmp;
-		return ret;
+		// Pass the choice down instead of temporarily changing the shared forceList field
+		return list(dirPath, dontUseMlst);
 	}
 
 	/**
@@ -1004,6 +1015,10 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	 * @throws IOException
 	 */
 	public synchronized String[] executeList(String dirPath) throws IOException {
+		return list(dirPath, forceList);
+	}
+
+	private String[] list(String dirPath, boolean useList) throws IOException {
 
 		/*
 		if(!setAsciiType()) {
@@ -1015,7 +1030,7 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		ClientDataTransferProcess dtp = getDataTransferProcess();
 		CRLFLineReader in = new CRLFLineReader(dtp.getInput());
 		try {
-			ClientFtpResponse res = sendMlsdOrList(dirPath);
+			ClientFtpResponse res = sendMlsdOrList(dirPath, useList);
 
 
 			if( res.isPositivePreliminay()) {

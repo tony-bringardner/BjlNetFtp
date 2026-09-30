@@ -149,9 +149,9 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 
 
 	private FileSource tmp;
-	private PassiveSocket pasvSocket; 	
+	private transient PassiveSocket pasvSocket; 	
 	private boolean passive = false;
-	private Socket dataSocket;
+	private transient Socket dataSocket;
 	private long lastActivity = 0;
 
 	//  Time out if inactive
@@ -162,7 +162,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	private String protLevel = DATA_CHANNEL_PROTECTION_LEVEL_CLEAR;
 	private int loginAttempts=0;
 	private int linger = -2;
-	public StreamController transferInProcess = new StreamController();
+	public transient StreamController transferInProcess = new StreamController();
 
 
 
@@ -211,7 +211,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 				user = user+"@"+acct;
 			}
 
-			IPrincipal principal1 = getServer().authenticate(user,password.getBytes());
+			IPrincipal principal1 = getServer().authenticate(user,password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
 			if( principal1 != null ){
 				setPrincipal(principal1);
@@ -591,48 +591,11 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 
-	public int binaryStreamCopy(InputStream in, OutputStream out) throws IOException{
-		byte buf[] = new byte[getBufferSize()];
-		int bytes_read;
-		int ret = 0;
-		logDebug("Enter binaryStreamCopy");
-
-		while( (bytes_read = in.read(buf)) >= 0 ){
-			touch(); 
-			if(bytes_read != 0) {
-				out.write(buf,0,bytes_read);
-				ret += bytes_read;
-			}
-		}
-		logDebug("exit binaryStreamCopy ret="+ret);
-		return ret;
-	}
-
 	/**
 	 * 
 	 */
 	private void touch() {
 		lastActivity = System.currentTimeMillis();
-	}
-
-	public int asciiStreamCopy(InputStream in, OutputStream out)	throws IOException{
-
-
-		BufferedReader input = new BufferedReader(new InputStreamReader(in));
-		PrintStream    output= new PrintStream(new BufferedOutputStream(out));
-
-
-		String line;
-		int ret = 0;
-
-		while( (line = input.readLine()) != null ) {
-			touch();
-			output.println(line);
-			ret += line.length() + 2;
-		}
-		output.flush();
-
-		return ret;	
 	}
 
 	public void transferStream(InputStream in, OutputStream out, Socket sock) throws IOException{

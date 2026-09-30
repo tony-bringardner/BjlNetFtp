@@ -123,7 +123,7 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 	 * @return All supported FACTS for the MLS* commands.
 	 */
 	public static Map<String, Integer> getSupportedFacts() {
-		return 	facts;
+		return 	java.util.Collections.unmodifiableMap(facts);
 	}
 
 
@@ -334,13 +334,11 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 
 		StringBuffer ret = new StringBuffer(" ");
 
-		Iterator<String> it = factsWanted.keySet().iterator();
-
-		while(it.hasNext()){
-			String key = (String)it.next();
+		for(Map.Entry<String, Integer> fact : factsWanted.entrySet()){
+			String key = fact.getKey();
 			String val = null;
 
-			Integer factType = (Integer)factsWanted.get(key);
+			Integer factType = fact.getValue();
 
 			switch(factType.intValue()){
 			case FACT_GROUP: val = file.getGroup().getName();break;

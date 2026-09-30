@@ -178,6 +178,7 @@ public class Site  extends BaseCommand  implements FtpCommand {
 				case 0: target.setOwnerReadable(r!=0);target.setOwnerWritable(w!=0);target.setOwnerExecutable(x!=0);break;
 				case 1: target.setGroupReadable(r!=0);target.setGroupWritable(w!=0);target.setGroupExecutable(x!=0);break;
 				case 2: target.setOtherReadable(r!=0);target.setOtherWritable(w!=0);target.setOtherExecutable(x!=0);break;
+				default: break; // only 3 permission digits are used
 				}
 			}
 		} catch (Exception e) {

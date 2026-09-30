@@ -100,6 +100,9 @@ public class Type extends NoAuthReqBaseCommand  implements FtpCommand {
 			case 'a': processor.setRepresentationType(FtpRequestProcessor.TYPE_ASCII);
 					ok = true;
 					break;
+			default:
+					// unsupported type, ok stays false
+					break;
 		}
 		if( ok ){
 			processor.reply(REPLY_200_OK,"type " + args[1]);

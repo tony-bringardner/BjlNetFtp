@@ -83,6 +83,10 @@ public class Mode extends BaseCommand implements FtpCommand {
 		boolean ok = false;
 		switch(args[1].toLowerCase().charAt(0)){
 			case 's': ok = true;
+					break;
+			default:
+					// only STREAM mode is supported
+					break;
 		}
 		if( ok ){
 			processor.reply(REPLY_200_OK,"mode " + args[1]);

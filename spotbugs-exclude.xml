@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Accepted SpotBugs findings. Each entry says why it is accepted.
+  Everything else fails "mvn verify".
+-->
+<FindBugsFilter>
+	<!--
+	  "May expose internal representation": the flagged getters/setters hand out sockets,
+	  streams, clients and processors on purpose; they are live collaborators, not value
+	  objects, and copying them is impossible or meaningless.
+	-->
+	<Match>
+		<Or>
+			<Bug pattern="EI_EXPOSE_REP"/>
+			<Bug pattern="EI_EXPOSE_REP2"/>
+		</Or>
+	</Match>
+
+	<!--
+	  "Constructor throws, object may be exposed to finalizer attacks": the flagged classes
+	  (streams and data connections) open a connection in the constructor and are not
+	  security boundaries; no untrusted code subclasses them.
+	-->
+	<Match>
+		<Bug pattern="CT_CONSTRUCTOR_THROW"/>
+	</Match>
+	<!--
+	  FtpClientFile.parent is only written in constructors and, in getParentFile(), on a new
+	  object before it is published through the volatile parentFile field. SpotBugs counts
+	  that write as "locked" and the constructor/getter accesses as "unlocked".
+	-->
+	<Match>
+		<Class name="us.bringardner.net.ftp.client.FtpClientFile"/>
+		<Field name="parent"/>
+		<Bug pattern="IS2_INCONSISTENT_SYNC"/>
+	</Match>
+</FindBugsFilter>

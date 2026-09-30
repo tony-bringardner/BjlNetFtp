@@ -230,7 +230,7 @@ public class Mlsd  extends BaseCommand  implements FeatCommand {
 			
 			try {
 				OutputStream out = sock.getOutputStream();			
-				out.write(buf.toString().getBytes());
+				out.write(buf.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
 				out.flush();
 				out.close();
 			} catch (Exception e) {

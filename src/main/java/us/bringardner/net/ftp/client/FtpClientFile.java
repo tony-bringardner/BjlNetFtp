@@ -64,7 +64,8 @@ public class FtpClientFile extends BaseObject {
 	private char type;
 	private char[] permissions;
 	private String mlstPermissions;
-	private FtpClientFile parentFile;
+	// volatile: lazily created with double-checked locking in getParentFile()
+	private volatile FtpClientFile parentFile;
 
 	
 	/**
@@ -217,9 +218,11 @@ public class FtpClientFile extends BaseObject {
 	 */
 	private String cleanup(String entry) {
 
-		StringBuffer ret = new StringBuffer(entry.length());
-		byte [] data = entry.getBytes();
-		byte lst = '\0';
+		StringBuilder ret = new StringBuilder(entry.length());
+		// Work on chars: the old byte-based version used a UTF-8 byte index as a String
+		// index, which garbled names when owner/group contained non-ASCII characters.
+		char [] data = entry.toCharArray();
+		char lst;
 		/*  /services/home/thewallicks.com/Backup/marie/My Documents/JFS
 		 * 
 		 * There are 9 data sections in an entry separated by whitespace.
@@ -231,12 +234,12 @@ public class FtpClientFile extends BaseObject {
 		for (; section < 8 && idx < data.length; idx++) {
 			if((lst=data[idx]) == ' ') {
 				section++;
-				while((data[idx+1]==' ' || data[idx+1]=='\t') && idx < data.length ) {
+				while( idx+1 < data.length && (data[idx+1]==' ' || data[idx+1]=='\t')) {
 					idx++;
 				}
 
 			}
-			ret.append((char)lst);
+			ret.append(lst);
 		}
 
 		//  We've found the name so use it to set our field

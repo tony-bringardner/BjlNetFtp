@@ -248,8 +248,7 @@ public class FtpServer extends Server {
 			try {
 				PassiveSocket.setControlPort(Integer.parseInt(tmp));
 			} catch (Exception e) {
-				logError("Can't configure passive control port='"+tmp+"'",e);
-				System.exit(1);
+				throw new IllegalArgumentException("Can't configure passive control port='"+tmp+"'",e);
 			}
 		}
 
@@ -258,8 +257,7 @@ public class FtpServer extends Server {
 			try {
 				PassiveSocket.setMinControlPort(Integer.parseInt(tmp));
 			} catch (Exception e) {
-				logError("Can't configure passive min control port='"+tmp+"'",e);
-				System.exit(1);
+				throw new IllegalArgumentException("Can't configure passive min control port='"+tmp+"'",e);
 			}
 		}
 		
@@ -267,8 +265,7 @@ public class FtpServer extends Server {
 			try {
 				PassiveSocket.setMaxControlPort(Integer.parseInt(tmp));
 			} catch (Exception e) {
-				logError("Can't configure passive max control port='"+tmp+"'",e);
-				System.exit(1);
+				throw new IllegalArgumentException("Can't configure passive max control port='"+tmp+"'",e);
 			}
 		}
 		//  trigger access control initialization 
