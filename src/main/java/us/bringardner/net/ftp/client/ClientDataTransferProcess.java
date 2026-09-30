@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
@@ -129,45 +130,54 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 
 
 	private Socket getServerSocket() throws IOException {
-		Socket ret = null;
 		FtpClient client = getClient();
 		ServerSocketFactory factory = client.getServerSocketFactory();
-		ServerSocket svr = factory.createServerSocket(getPort());
-		svr.setSoTimeout(client.getTransferTimeout());
-		ret = svr.accept();
-		if( ret != null ) {
+		// Closed after one connection (previously the listener was never closed)
+		try (ServerSocket svr = factory.createServerSocket()) {
+			int bufSz = client.getTransferBufferSize();
+			if( bufSz > 0 ) {
+				// Must be set before bind/accept to take effect for TCP window scaling
+				svr.setReceiveBufferSize(bufSz);
+			}
+			svr.bind(new InetSocketAddress(getPort()), 1);
+			svr.setSoTimeout(client.getTransferTimeout());
+			Socket ret = svr.accept();
 			ret.setSoTimeout(client.getTransferTimeout());
+			return ret;
 		}
-
-
-		return ret;
 	}
-
+	
 	private Socket getClientSocket() throws UnknownHostException, IOException {
-		logDebug("Enter getClientSocket");
-		Socket ret = null;
 		FtpClient client = getClient();
 		SocketFactory factory = client.getSocketFactory();
-		if (factory instanceof SSLSocketFactory	) {
-			SSLSocket tmp  = (SSLSocket) factory.createSocket(host, port);
-			logDebug("getClientSocket switching SSL mode");
-			tmp.setUseClientMode(true);
-			ret = tmp;
-		} else {
-			ret = factory.createSocket(getHost(), getPort());
-		}
-		
-		if( ret != null ) {
-			ret.setSoTimeout(client.getTransferTimeout());
+		// Create unconnected so buffer sizes apply to the connection (they must be set
+		// before connect for TCP window scaling) and so we can use a connect timeout.
+		Socket ret = factory.createSocket();
+		try {
+			if (ret instanceof SSLSocket ) {
+				((SSLSocket)ret).setUseClientMode(true);
+			}
+			int bufSz = client.getTransferBufferSize();
+			if( bufSz > 0 ) {
+				ret.setReceiveBufferSize(bufSz);
+				ret.setSendBufferSize(bufSz);
+			}
 			ret.setTcpNoDelay(true);
-			ret.setReceiveBufferSize(64*1024);
-			ret.setSendBufferSize(64*1024);
+			ret.connect(new InetSocketAddress(getHost(), getPort()), client.getTransferTimeout());
+			ret.setSoTimeout(client.getTransferTimeout());
+		} catch (IOException e) {
+			try {
+				ret.close();
+			} catch (IOException e1) {
+			}
+			throw e;
 		}
-		logDebug("Exit getClientSocket ret="+ret);
+		if( isDebugEnabled() ) {
+			logDebug("Connected data socket "+ret);
+		}
 		return ret;
 	}
-
-
+	
 	public Socket getSocket() throws IOException {
 		if( socket == null ) {
 			synchronized (this) {
@@ -181,11 +191,6 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 						tmp = getServerSocket();
 					}
 					
-					int bufSz = client.getTransferBufferSize();
-					if( bufSz > 0 ) {
-						tmp.setSendBufferSize(bufSz);
-						tmp.setReceiveBufferSize(bufSz);
-					}
 					int linger = client.getTransferLinger();
 					int timeout = client.getTransferTimeout();
 					tmp.setSoTimeout(timeout);
@@ -275,17 +280,14 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 		port += Integer.parseInt(parts[5]);
 		logDebug("\tport="+port);
 		setPort(port);
-		try {
-			InetAddress addr = InetAddress.getByName(tmp);
-			if( !addr.isReachable(300)) {
-				logDebug("Server sent unreachable address, using server host name instead.");
-				setHost(getClient().getHost());
-			}
-		} catch (Exception e) {
-			logDebug("error validating address, using server host name instead.");
+		/*
+		 * By default connect to the control connection's host and ignore the address in the
+		 * PASV reply (like curl's --ftp-skip-pasv-ip). Servers behind NAT often send a private
+		 * address, and the old InetAddress.isReachable() probe cost up to 300ms per transfer.
+		 */
+		if( !getClient().isUsePasvAddress() ) {
 			setHost(getClient().getHost());
 		}
-
 		logDebug("Exit setHostAndPort str="+str);
 	}
 

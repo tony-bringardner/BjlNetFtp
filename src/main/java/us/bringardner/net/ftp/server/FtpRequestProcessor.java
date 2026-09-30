@@ -729,15 +729,15 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		if( this.linger  ==  -2) {
 
 			this.linger = -1;			
+			/*
+			 * SO_LINGER is off by default. With linger on, close() blocks the transfer thread
+			 * until the peer acknowledges all data, up to the linger time (this used to default
+			 * to the activity timeout, i.e. 10 minutes). A normal close still delivers all
+			 * queued data in the background.
+			 */
 			String tmp = System.getProperty("JavaFtpServer.linger");
 			if( tmp != null ) {
 				try { this.linger = Integer.parseInt(tmp); } catch(Exception ex) {}
-			} else {
-				int tmo = getActivityTimeOut();
-				if( tmo > 1000 ) {
-					//  Linger is in seconds
-					this.linger = tmo / 1000;
-				}
 			}
 		}
 		return this.linger;

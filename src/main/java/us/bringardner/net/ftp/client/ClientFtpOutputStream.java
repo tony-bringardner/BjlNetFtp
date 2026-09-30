@@ -29,6 +29,7 @@
  */
 package us.bringardner.net.ftp.client;
 
+import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.SocketTimeoutException;
@@ -62,7 +63,8 @@ public class ClientFtpOutputStream extends OutputStream implements FTP {
         
         dtp = client.getDataTransferProcess();
 
-        out = dtp.getOutput();
+        // Buffered: write(int) on a raw socket stream is one system call (and TCP packet) per byte
+        out = new BufferedOutputStream(dtp.getOutput(), Math.max(8192, client.getTransferBufferSize()));
         ClientFtpResponse res = null;
         
         if( append ) {

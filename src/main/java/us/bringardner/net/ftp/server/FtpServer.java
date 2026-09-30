@@ -132,7 +132,8 @@ public class FtpServer extends Server {
 		setSecure(secure);
 		setDaemon(false);
 		initMe();
-		getLogger().setLevel(us.bringardner.core.ILogger.Level.DEBUG);
+		// INFO by default: DEBUG logs several lines per transfer, including paths and client addresses
+		getLogger().setLevel(us.bringardner.core.ILogger.Level.INFO);
 	}
 	
 	public FtpServer() {

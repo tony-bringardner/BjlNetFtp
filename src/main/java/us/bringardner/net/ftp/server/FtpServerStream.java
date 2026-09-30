@@ -312,6 +312,13 @@ public class FtpServerStream extends BaseThread {
 			}
 
 			synchronized (lock) {
+				/*
+				 * Mark the transfer finished BEFORE sending the final reply. The client may send
+				 * its next command (e.g. PASV + RETR) the instant it reads the 226; if we are still
+				 * "active" at that point the next transfer is refused with 425.
+				 * A concurrent ABOR waits for this lock, so its reply still follows ours.
+				 */
+				finished = true;
 				try {
 					if( aborted ) {
 						/*

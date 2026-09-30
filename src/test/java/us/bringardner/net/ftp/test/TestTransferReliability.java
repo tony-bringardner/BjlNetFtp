@@ -107,6 +107,31 @@ public class TestTransferReliability {
 		}
 	}
 
+	/**
+	 * Back to back transfers with no pause: the client sends the next PASV/RETR the moment
+	 * it reads the 226. This used to fail intermittently with "425 Data transfer already
+	 * in process" because the server sent 226 before marking the transfer finished.
+	 */
+	@Test
+	public void backToBackTransfersWithClient() throws Exception {
+		try (Session s = new Session()) {
+			s.put("rapid.bin", new byte[] { 1, 2, 3 });
+		}
+		us.bringardner.net.ftp.client.FtpClient client = new us.bringardner.net.ftp.client.FtpClient("localhost", PORT);
+		client.setRequestSecure(false);
+		client.getLogger().setLevel(Level.ERROR);
+		try {
+			assertTrue(client.connect("anonymous", "x", null));
+			for (int i = 0; i < 1500; i++) {
+				try (InputStream in = client.getInputStream("rapid.bin")) {
+					assertArrayEquals(new byte[] { 1, 2, 3 }, in.readAllBytes(), "iteration " + i);
+				}
+			}
+		} finally {
+			client.close();
+		}
+	}
+
 	// ------------------------------------------------------------------ fix 2: stalled transfers
 
 	@Test

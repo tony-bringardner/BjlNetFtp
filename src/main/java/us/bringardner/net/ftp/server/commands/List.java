@@ -49,9 +49,31 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
 public class List  extends BaseCommand  implements FtpCommand {
 
 	private static final long serialVersionUID = 1L;
-	public static final long ONE_YEAR = (1000*60)*60*24*365;
-	public static final ThreadSafeDateFormat newDateFmt = new ThreadSafeDateFormat("MMM dd HH:mm");
-	public static final ThreadSafeDateFormat oldDateFmt = new ThreadSafeDateFormat("MMM dd yyyy");
+	// long arithmetic: the int version overflowed to about 17 days
+	public static final long ONE_YEAR = 365L*24*60*60*1000;
+	/*
+	 * Month names in LIST output must be English regardless of the server's default
+	 * locale, or clients (including FtpClientFile) can't parse them.
+	 */
+	public static final UsDateFormat newDateFmt = new UsDateFormat("MMM dd HH:mm");
+	public static final UsDateFormat oldDateFmt = new UsDateFormat("MMM dd yyyy");
+
+	/** A thread safe date format that always uses {@link java.util.Locale#US}. */
+	public static class UsDateFormat {
+		private final java.text.SimpleDateFormat format;
+
+		public UsDateFormat(String pattern) {
+			format = new java.text.SimpleDateFormat(pattern, java.util.Locale.US);
+		}
+
+		public synchronized String format(Date date) {
+			return format.format(date);
+		}
+
+		public synchronized Date parse(String value) throws java.text.ParseException {
+			return format.parse(value);
+		}
+	}
     //public static final ThreadSafeDateFormat completeFmt = new ThreadSafeDateFormat("MMM dd yyyy HH:mm");
 	
 	/**

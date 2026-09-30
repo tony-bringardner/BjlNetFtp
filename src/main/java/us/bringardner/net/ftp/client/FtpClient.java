@@ -106,10 +106,10 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private boolean connected = false;
 	//  Socket timeout in milliseconds
 	private int cmdTimeout = 60000;
-	//  Socket linger in seconds
-	private int cmdLinger = 120;
+	//  Socket linger in seconds (off by default, a positive value makes close() block)
+	private int cmdLinger = -1;
 	private int txferTimeout = 60000;
-	private int transferLinger = 600;    
+	private int transferLinger = -1;    
 	private String currentDir;
 	private ClientFtpResponse lastResponse;
 
@@ -139,6 +139,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private volatile boolean mlstTested = false;
 	private volatile boolean mlstSupported = false;
 	private int transferBufferSize = 1024*65;
+	private boolean usePasvAddress = false;
 	private boolean active = false;
 	private boolean channelSecure;
 	public boolean forceList;
@@ -484,19 +485,26 @@ public class FtpClient extends SecureBaseObject implements FTP {
 					String host = getHost();
 					int port = getPort();
 					logDebug("Attempt connect to "+host+":"+port);
-					Socket tmp = getSocketFactory().createSocket(host,port);
 					int timeout = getCmdTimeout();
 					int linger = getCmdLinger();
-					logDebug("Connected to "+host+":"+port+" setting timeout="+timeout+" linger = "+linger);
-					tmp.setSoTimeout(timeout);
-					if( linger > 0 ) {
-						tmp.setSoLinger(true, linger);
+					// Unconnected first so we can use a connect timeout
+					Socket tmp = getSocketFactory().createSocket();
+					try {
+						tmp.setKeepAlive(true);
+						tmp.setTcpNoDelay(true);
+						tmp.connect(new java.net.InetSocketAddress(host, port), timeout);
+						tmp.setSoTimeout(timeout);
+						if( linger > 0 ) {
+							tmp.setSoLinger(true, linger);
+						}
+					} catch (IOException e) {
+						try {
+							tmp.close();
+						} catch (IOException e1) {
+						}
+						throw e;
 					}
-
-					tmp.setKeepAlive(true);
-					tmp.setTcpNoDelay(true);
-					tmp.setReceiveBufferSize(64*1024);
-					tmp.setSendBufferSize(64*1024);
+					logDebug("Connected to "+host+":"+port+" timeout="+timeout+" linger = "+linger);
 					socket = tmp;
 				}				
 			}
@@ -1234,6 +1242,22 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		}
 
 		return featResponse;
+	}
+
+	/**
+	 * @return true if the client connects to the address in the server's PASV reply,
+	 * false (default) to use the control connection's host.
+	 */
+	public boolean isUsePasvAddress() {
+		return usePasvAddress;
+	}
+
+	/**
+	 * @param usePasvAddress true to connect to the address in the PASV reply (only needed
+	 * when the server deliberately sends a different host, e.g. FXP). Default false.
+	 */
+	public void setUsePasvAddress(boolean usePasvAddress) {
+		this.usePasvAddress = usePasvAddress;
 	}
 
 	public int getTransferBufferSize() {		
