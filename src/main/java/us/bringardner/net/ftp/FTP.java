@@ -194,6 +194,8 @@ public interface FTP {
 	public static final int REPLY_226_CLOSING_DATA_CON = 226; // Closing data connection.        Requested file action successful (for example, file        transfer or file abort).
 	public static final int REPLY_426_CON_CLOSED =  426;// Connection closed; transfer aborted.
 	public static final int REPLY_227_ENTERING_PASSIVE_MODE = 227; // Entering Passive Mode (h1,h2,h3,h4,p1,p2).
+	public static final int REPLY_229_ENTERING_EXTENDED_PASSIVE_MODE = 229; // Entering Extended Passive Mode (|||port|). RFC 2428
+	public static final int REPLY_522_NETWORK_PROTOCOL_NOT_SUPPORTED = 522; // Network protocol not supported. RFC 2428
 
 	public static final int REPLY_230_USER_LOGGED_IN = 230;// User logged in, proceed.
 	public static final int REPLY_530_USER_NOT_LOGGED_IN = 530; // Not logged in.

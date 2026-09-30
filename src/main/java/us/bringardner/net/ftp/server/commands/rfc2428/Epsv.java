@@ -135,41 +135,37 @@ RFC 2428            FTP Extensions for IPv6 and NATs      September 1998
      * @see us.bringardner.net.ftp.server.FtpCommand#execute(us.bringardner.net.ftp.server.FtpRequestProcessor, java.lang.String)
      */
     public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
-    	processor.logDebug("Enter EPSV command  secure = "+processor.isSecure());
-    	/*
-    	 *  EPSV<space><net-prt>
-
-   If the requested protocol is supported by the server, it SHOULD use
-   the protocol.  If not, the server MUST return the 522 error messages
-   as outlined in section 2.
-    	 */
     	if(context.hasNext()) {
-    		//String net_prt = context.getRemainingTokens();
-    		//???
+    		/*
+    		 * EPSV ALL: the client promises to use only EPSV from now on (a hint for NATs).
+    		 * EPSV <net-prt>: 1 = IPv4, 2 = IPv6. We always use the control connection's protocol.
+    		 */
+    		String arg = context.getNextToken().trim();
+    		if( arg.equalsIgnoreCase("ALL")) {
+    			processor.reply(REPLY_200_OK,"EPSV ALL command successful");
+    			return;
+    		}
+    		boolean ipv6 = processor.getConnection().getSocket().getLocalAddress() instanceof java.net.Inet6Address;
+    		String supported = ipv6 ? "2" : "1";
+    		if( !arg.equals(supported)) {
+    			processor.reply(REPLY_522_NETWORK_PROTOCOL_NOT_SUPPORTED,"Network protocol not supported, use ("+supported+")");
+    			return;
+    		}
     	}
-        PassiveSocket pasvSocket = new PassiveSocket(processor);
 
-        Thread t = new Thread(pasvSocket);
-        t.setName("FTP_PasvSocket");
-        t.start();
-        while(!pasvSocket.isRunning() && !pasvSocket.isComplete()) {
-            // Wait for this guy to get up and running.
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException ex) {
-            }
-        }
-        processor.logDebug("pasvSocket should be running now running="+pasvSocket.isRunning()+" complete="+pasvSocket.isComplete()+" error="+pasvSocket.isError());
-        processor.logDebug("pasvSocket toString="+pasvSocket.toString()+" EPSV=(|||"+pasvSocket.getPort()+"|)");
-        processor.setPasvSocket(pasvSocket);
-        /*
- 		The text returned in response to the EPSV command MUST be:
-
-        <text indicating server is entering extended passive mode> (<d><d><d><tcp-port><d>)
-         */
-        processor.reply(REPLY_227_ENTERING_PASSIVE_MODE,"Entering Extended Passive Mode (|||"+pasvSocket.getPort()+"|)");
-        processor.logDebug("Exit EPSV command  secure = "+processor.isSecure());
-
+    	// Closes any previous passive/active data connection
+    	processor.setPasvSocket(null);
+    	PassiveSocket pasvSocket;
+    	try {
+    		// The socket is bound before we reply, so the advertised port is always valid.
+    		pasvSocket = PassiveSocket.open(processor);
+    	} catch (IOException e) {
+    		processor.logError("Can't open passive data port", e);
+    		processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open passive connection");
+    		return;
+    	}
+    	processor.setPasvSocket(pasvSocket);
+    	// RFC 2428: the reply code MUST be 229
+    	processor.reply(REPLY_229_ENTERING_EXTENDED_PASSIVE_MODE,"Entering Extended Passive Mode (|||"+pasvSocket.getPort()+"|)");
     }
-
 }

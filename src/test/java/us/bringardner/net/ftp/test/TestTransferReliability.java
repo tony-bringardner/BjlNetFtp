@@ -218,6 +218,123 @@ public class TestTransferReliability {
 		}
 	}
 
+	// ------------------------------------------------------------------ PASV / EPSV
+
+	@Test
+	public void pasvRepliesWithoutDelay() throws Exception {
+		try (Session s = new Session()) {
+			int count = 20;
+			long start = System.nanoTime();
+			for (int i = 0; i < count; i++) {
+				s.send("PASV");
+				s.expect(227);
+			}
+			long avgMs = (System.nanoTime() - start) / 1_000_000 / count;
+			// Previously each PASV polled in 200ms steps.
+			assertTrue(avgMs < 100, "PASV took " + avgMs + "ms on average");
+		}
+	}
+
+	@Test
+	public void newPasvClosesPreviousListener() throws Exception {
+		try (Session s = new Session()) {
+			int first = s.pasvPort();
+			s.pasvPort();
+			assertPortClosed(first);
+		}
+	}
+
+	@Test
+	public void pasvListenerClosedWhenSessionEnds() throws Exception {
+		int port;
+		try (Session s = new Session()) {
+			port = s.pasvPort();
+		}
+		assertPortClosed(port);
+	}
+
+	@Test
+	public void abandonedPasvTimesOut() throws Exception {
+		try (Session s = new Session()) {
+			s.put("abandon.txt", "x".getBytes(StandardCharsets.UTF_8));
+			int port = s.pasvPort(); // never connect
+			long start = System.currentTimeMillis();
+			s.send("RETR abandon.txt");
+			Reply r = s.read(DATA_TIMEOUT_MS * 5);
+			long elapsed = System.currentTimeMillis() - start;
+			assertEquals(425, r.code, "RETR with no data connection: " + r);
+			assertTrue(elapsed < DATA_TIMEOUT_MS * 4L, "took " + elapsed + "ms");
+			assertPortClosed(port);
+			// the session is still usable
+			assertArrayEquals("x".getBytes(StandardCharsets.UTF_8), s.get("abandon.txt"));
+		}
+	}
+
+	@Test
+	public void pasvSkipsBusyPortsInRange() throws Exception {
+		int oldMin = us.bringardner.net.ftp.server.PassiveSocket.getMinControlPort();
+		int oldMax = us.bringardner.net.ftp.server.PassiveSocket.getMaxControlPort();
+		try (java.net.ServerSocket busy = new java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1"));
+				Session s = new Session()) {
+			int base = busy.getLocalPort();
+			us.bringardner.net.ftp.server.PassiveSocket.setMaxControlPort(base + 2);
+			us.bringardner.net.ftp.server.PassiveSocket.setMinControlPort(base);
+			for (int i = 0; i < 6; i++) {
+				int port = s.pasvPort();
+				assertTrue(port == base + 1 || port == base + 2, "port " + port + " outside " + base + "-" + (base + 2) + " or busy");
+			}
+		} finally {
+			us.bringardner.net.ftp.server.PassiveSocket.setMinControlPort(oldMin);
+			us.bringardner.net.ftp.server.PassiveSocket.setMaxControlPort(oldMax);
+		}
+	}
+
+	@Test
+	public void epsvReplies229AndTransfers() throws Exception {
+		byte[] content = "epsv content".getBytes(StandardCharsets.UTF_8);
+		try (Session s = new Session()) {
+			s.put("epsv.txt", content);
+
+			s.send("EPSV 2");
+			s.expect(522);
+
+			s.send("EPSV");
+			Reply r = s.expect(229);
+			Matcher m = Pattern.compile("\\(\\|\\|\\|(\\d+)\\|\\)").matcher(r.text);
+			assertTrue(m.find(), "bad EPSV reply " + r);
+			int port = Integer.parseInt(m.group(1));
+			ByteArrayOutputStream buf = new ByteArrayOutputStream();
+			try (Socket data = new Socket()) {
+				data.connect(new InetSocketAddress("127.0.0.1", port), 5000);
+				data.setSoTimeout(10000);
+				s.send("RETR epsv.txt");
+				s.expectPreliminary();
+				data.getInputStream().transferTo(buf);
+			}
+			s.expectComplete();
+			assertArrayEquals(content, buf.toByteArray());
+
+			s.send("EPSV ALL");
+			s.expect(200);
+		}
+	}
+
+	private static void assertPortClosed(int port) throws InterruptedException {
+		// The server closes the listener asynchronously at session end; allow a moment.
+		long end = System.currentTimeMillis() + 3000;
+		while (true) {
+			try (Socket probe = new Socket()) {
+				probe.connect(new InetSocketAddress("127.0.0.1", port), 1000);
+			} catch (IOException e) {
+				return; // refused: closed
+			}
+			if (System.currentTimeMillis() > end) {
+				fail("passive port " + port + " is still accepting connections");
+			}
+			Thread.sleep(50);
+		}
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	private static void assertNoTempFiles() throws IOException {
@@ -338,6 +455,14 @@ public class TestTransferReliability {
 
 		Socket pasv() throws IOException {
 			return pasv(-1);
+		}
+
+		int pasvPort() throws IOException {
+			send("PASV");
+			Reply r = expect(227);
+			Matcher m = PASV.matcher(r.text);
+			assertTrue(m.find(), "bad PASV reply " + r);
+			return Integer.parseInt(m.group(5)) * 256 + Integer.parseInt(m.group(6));
 		}
 
 		Socket pasv(int receiveBuffer) throws IOException {

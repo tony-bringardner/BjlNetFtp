@@ -26,250 +26,228 @@
 package us.bringardner.net.ftp.server;
 
 import java.io.IOException;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 
 import javax.net.ServerSocketFactory;
+
 /**
- * This class is used to implement the DTP in PASIVE mode
- * All other DTP functions are provided by the ReqProcessor
- * 
+ * The server side of a passive (PASV / EPSV) data connection.
+ * <p>
+ * {@link #open(FtpRequestProcessor)} binds the listening socket <b>before</b> the 227/229
+ * reply is sent, so the advertised port is always valid and there is no startup wait.
+ * The connection is accepted lazily, on the control thread, the first time the data socket
+ * is needed (the client's connect completes in the listen backlog in the meantime). 
+ * A passive socket is used for exactly one data connection: the listening socket is closed
+ * as soon as a connection is accepted, when the accept times out, or when
+ * {@link #abor()} is called (a new PASV/PORT, ABOR or end of session).
  */
-public  class PassiveSocket implements Runnable {
-	
-		
-    public static final int MAX_ERRORS = 4;
+public  class PassiveSocket {
 
-    private static int minControlPort = 10333;
-    private static int maxControlPort = 65333;
-    
-    private static int controlPort = minControlPort;
+	/** Kept for compatibility, no longer used. */
+	public static final int MAX_ERRORS = 4;
 
+	private static int minControlPort = 10333;
+	private static int maxControlPort = 65333;
 
+	/** The next port to try (rotates through [minControlPort, maxControlPort]). */
+	private static int controlPort = minControlPort;
 
-    private String [] hostAry;
-    private 	int port;
-    private 	Socket dataSocket;
-    private boolean running = false;
-    private boolean error = false;
-    private boolean complete = false;
-    private FtpRequestProcessor prosessor ;
-    private StringBuffer debug = new StringBuffer();
+	private final FtpRequestProcessor processor;
+	private final InetAddress advertisedAddress;
+	private final int port;
+	private ServerSocket serverSocket;
+	private Socket dataSocket;
+	private boolean closed = false;
 
-    /**
-     * PassiveSocket constructor comment.
-     */
-    public PassiveSocket(FtpRequestProcessor processor)	throws java.net.UnknownHostException
-    {
-        this.prosessor = processor;
-        InetAddress add = prosessor.getConnection().getSocket().getLocalAddress();
-        String tmp = System.getProperty(FtpServer.EXTERNAL_ADDRESS_PROP);
+	/**
+	 * Bind a listening socket on a free port in the configured range.
+	 *
+	 * @param processor the control connection that owns this data connection
+	 * @return a bound PassiveSocket
+	 * @throws IOException if no port in the range could be bound
+	 */
+	public static PassiveSocket open(FtpRequestProcessor processor) throws IOException {
+		InetAddress local = processor.getConnection().getSocket().getLocalAddress();
+		ServerSocketFactory factory = processor.getServerSocketFactory();
+
+		int min, max;
+		synchronized (PassiveSocket.class) {
+			min = minControlPort;
+			max = maxControlPort;
+		}
+		int attempts = max - min + 1;
+		IOException last = null;
+		for(int i = 0; i < attempts; i++) {
+			int port = nextControlPort();
+			ServerSocket svr = null;
+			try {
+				svr = factory.createServerSocket(port, 1, local);
+				return new PassiveSocket(processor, svr, advertisedAddress(processor, local));
+			} catch (IOException e) {
+				// Port in use (or not permitted), try the next one.
+				last = e;
+				if( svr != null ) {
+					try {
+						svr.close();
+					} catch (IOException e1) {
+					}
+				}
+			}
+		}
+		throw new IOException("No free passive port in range "+min+"-"+max, last);
+	}
+
+	private static InetAddress advertisedAddress(FtpRequestProcessor processor, InetAddress local) {
+		String tmp = System.getProperty(FtpServer.EXTERNAL_ADDRESS_PROP);
 		if( tmp != null ) {
 			try {
-				add = InetAddress.getByName(tmp);
+				return InetAddress.getByName(tmp);
 			} catch (UnknownHostException e) {
 				processor.logError("Can't find address for external ("+tmp+")");
 			}
 		}
+		return local;
+	}
 
-        setHost(add);
-        setPort(getControlPort());
-    }
+	private PassiveSocket(FtpRequestProcessor processor, ServerSocket svr, InetAddress advertised) throws SocketException {
+		this.processor = processor;
+		this.serverSocket = svr;
+		this.port = svr.getLocalPort();
+		this.advertisedAddress = advertised;
+		int timeout = processor.getActivityTimeOut();
+		svr.setSoTimeout(timeout > 0 ? timeout : FtpServer.DEFAULT_DATA_TIMEOUT);
+	}
 
-    public void abor()
-    {
-        running = false;
-        if( dataSocket != null ) {
-            try {
-            	dataSocket.close(); 
-            	dataSocket = null;
-            	} catch(Exception ex) {}
-        }
-    }
-    
-    
-    
-    
-    public static int getMinControlPort() {
+	/**
+	 * Close the listening socket and any accepted data socket.
+	 */
+	public synchronized void abor() {
+		closed = true;
+		closeServerSocket();
+		if( dataSocket != null ) {
+			try {
+				dataSocket.close();
+			} catch(Exception ex) {
+			}
+			dataSocket = null;
+		}
+	}
+
+	private void closeServerSocket() {
+		if( serverSocket != null ) {
+			try {
+				serverSocket.close();
+			} catch (IOException e) {
+			}
+			serverSocket = null;
+		}
+	}
+
+	/**
+	 * Accept the client's data connection (waits up to the processor's activity timeout).
+	 *
+	 * @return the connected data socket, or null if the client did not connect in time
+	 * or this passive socket was closed.
+	 */
+	public synchronized Socket getDataSocket() {
+		if( dataSocket != null || closed ) {
+			return dataSocket;
+		}
+		try {
+			dataSocket = serverSocket.accept();
+			dataSocket.setSoTimeout(processor.getActivityTimeOut());
+		} catch (SocketTimeoutException e) {
+			processor.logDebug("Timed out waiting for passive data connection on port "+port);
+		} catch (IOException e) {
+			if( !closed ) {
+				processor.logError("Error accepting passive data connection on port "+port, e);
+			}
+		} finally {
+			// One connection per PASV.
+			closeServerSocket();
+		}
+		return dataSocket;
+	}
+
+	public static synchronized int getMinControlPort() {
 		return minControlPort;
 	}
 
-	public synchronized static void setMinControlPort(int minControlPort) {
+	public static synchronized void setMinControlPort(int minControlPort) {
 		PassiveSocket.minControlPort = minControlPort;
 		if( controlPort < minControlPort) {
 			controlPort = minControlPort;
 		}
 	}
 
-	public static int getMaxControlPort() {
+	public static synchronized int getMaxControlPort() {
 		return maxControlPort;
 	}
 
-	public synchronized static void setMaxControlPort(int maxControlPort) {
+	public static synchronized void setMaxControlPort(int maxControlPort) {
 		PassiveSocket.maxControlPort = maxControlPort;
 		if( controlPort > maxControlPort) {
-			controlPort = maxControlPort;
+			controlPort = minControlPort;
 		}
 	}
 
 	/**
-     * Creation date: (9/5/01 8:53:20 AM)
-     * @return int
-     */
-    public synchronized static int getControlPort() 
-    {
-    	
-    	if( controlPort ++ > maxControlPort) {
-    		controlPort = minControlPort;
-    	}
-        
-        return controlPort;
-    }
-    
-    /**
-     * Creation date: (9/5/01 11:14:50 AM)
-     * @return java.net.Socket
-     */
-    public java.net.Socket getDataSocket() {
-        prosessor.logDebug("Enter PassiveSocket.getDataSocket get dataSocket running="+running+" comp="+complete+" err="+error);
-        while(!isComplete()) {
-            prosessor.logDebug("PassiveSocket.getDataSocket waiting to compete.");
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException ex) { }
-        }
-        prosessor.logDebug("Enter PassiveSocket.getDataSocket haveSocket="+(dataSocket==null?"No":"Yes"));
-        return dataSocket;
-    }
+	 * @return the next port to try, always within [minControlPort, maxControlPort].
+	 */
+	public static synchronized int getControlPort() {
+		return nextControlPort();
+	}
 
-    public  void run()
-    {
-        prosessor.logDebug("PasvSocket.run -- start");
+	private static synchronized int nextControlPort() {
+		if( controlPort < minControlPort || controlPort > maxControlPort ) {
+			controlPort = minControlPort;
+		}
+		int ret = controlPort;
+		controlPort = ret >= maxControlPort ? minControlPort : ret + 1;
+		return ret;
+	}
 
-        ServerSocketFactory factory = prosessor.getServerSocketFactory();
-        
-        ServerSocket svrSock;
-        int timeout = prosessor.getActivityTimeOut();
+	static synchronized void setControlPort(int newCtrPort) {
+		controlPort = newCtrPort;
+		if(controlPort < minControlPort) {
+			minControlPort = controlPort;
+		} else if( controlPort > maxControlPort) {
+			maxControlPort = controlPort;
+		}
+	}
 
-        try {
+	/**
+	 * @return the port this passive socket is listening on
+	 */
+	public int getPort() {
+		return port;
+	}
 
-            //svrSock = factory.createServerSocket(port,4,host);
-            svrSock = factory.createServerSocket(port);            
-            svrSock.setSoTimeout(timeout);
+	/**
+	 * @return true if the advertised address can be expressed in a PASV (IPv4) reply.
+	 */
+	public boolean isIpv4() {
+		return advertisedAddress instanceof Inet4Address;
+	}
 
-        } catch (IOException ex) {
-            error  = true;
-            complete = true;
-            debug.append("Error creating server socket:"+ex);
-            prosessor.logError("Error creating server socket",ex);
-            return;
-        }
-
-
-        int errCnt = 0;
-        prosessor.logDebug("PasvSocket.run -- have serverSocket");
-        IOException [] errors = new IOException[MAX_ERRORS];
-        running = true;
-
-        while(running && dataSocket==null && errCnt < errors.length) {
-            try {
-                prosessor.logDebug("PasvSocket.run -- before accept.");
-                dataSocket =  svrSock.accept();
-                prosessor.logDebug("PasvSocket.run -- socket accepted.");
-            } catch (IOException ex2) {
-                prosessor.logDebug("PasvSocket.run -- accept error ex="+ex2);
-                prosessor.logError("Error in PasvSocket run errCnt="+errCnt,ex2);
-                errors[errCnt++] = ex2;
-            }
-        }
-        running = false;
-        complete = true;
-        if( dataSocket == null ) {
-            //  Could not get a Socket
-            prosessor.logDebug("Could not get data Sokect due to errors ("+errors[errors.length-1]+")");
-            debug.append("Could not get data Sokect due to errors ("+errors[errors.length-1]+")");
-        } else {
-            //  Was able to get a socket
-            try {
-                dataSocket.setSoTimeout(prosessor.getActivityTimeOut());
-            } catch (SocketException ex2) {
-                prosessor.logError("Error in settint timeout in PasvSocket =",ex2);
-            }
-        }
-        prosessor.logDebug("PasvSocket.run -- end have socket="+(dataSocket==null?"No":"Yes"));
-
-    }
-    
-    public boolean isError() {
-        return error;
-    }
-
-    public boolean isComplete() {
-        return complete;
-    }
-
-    public int getPort() {
-    	return port;
-    }
-    
-    /**
-     * Creation date: (9/5/01 8:53:20 AM)
-     * @param newCtrPort int
-     */
-    static synchronized void setControlPort(int newCtrPort) {
-        controlPort = newCtrPort;
-        if(controlPort < minControlPort) {
-        	minControlPort = controlPort;
-        } else if( controlPort > maxControlPort) {
-        	maxControlPort = controlPort;
-        }
-    }
-    
-    /**
- Set the host array based on the int val
-     */
-    public void setHost(InetAddress addr)
-    {
-
-        // Should work out to 4,109
-        //host = addr;
-        byte [] b = addr.getAddress();
-        hostAry = new String[b.length];
-        for(int i=0; i< b.length; i++ ) {
-            hostAry[i] = ""+((int)b[i]&0xff);
-        }
-
-
-    }
-    /**
- Set the port array based on the int val
-     */
-    public void setPort(int val)
-    {
-
-        port = val;
-
-    }
-    public String toString()
-    {
-        short p1 = (short)(port/256);
-        short p2 = (short)(port-(p1*256));
-
-
-        return
-        hostAry[0]+","+
-        hostAry[1]+","+
-        hostAry[2]+","+
-        hostAry[3]+","+
-        p1+","+
-        p2;
-
-    }
-
-    public boolean isRunning() {
-        return running;
-    }
+	/**
+	 * @return the PASV address in h1,h2,h3,h4,p1,p2 form
+	 */
+	@Override
+	public String toString() {
+		byte [] b = advertisedAddress.getAddress();
+		StringBuilder ret = new StringBuilder();
+		if( b.length == 4 ) {
+			for(byte v : b) {
+				ret.append(v & 0xff).append(',');
+			}
+		}
+		return ret.append(port / 256).append(',').append(port % 256).toString();
+	}
 }

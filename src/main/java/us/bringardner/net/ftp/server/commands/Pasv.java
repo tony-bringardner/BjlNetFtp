@@ -68,30 +68,23 @@ public class Pasv extends BaseCommand implements FtpCommand {
      * @see us.bringardner.net.ftp.server.FtpCommand#execute(us.bringardner.net.ftp.server.FtpRequestProcessor, java.lang.String)
      */
     public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
-
-        PassiveSocket pasvSocket = new PassiveSocket(processor);
-
-        Thread t = new Thread(pasvSocket);
-        t.setName("FTP_PasvSocket");
-        t.start();
-        int timeout = processor.getServer().getAcceptTimeout();
-        
-        long start = System.currentTimeMillis();
-        while((System.currentTimeMillis()-start < timeout)
-        		&& 
-        		(!pasvSocket.isRunning() && 
-        		!pasvSocket.isComplete())
-        	) {
-            // Wait for this guy to get up and running.
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException ex) {
-            }
+        // Closes any previous passive/active data connection
+        processor.setPasvSocket(null);
+        PassiveSocket pasvSocket;
+        try {
+            // The socket is bound before we reply, so the advertised port is always valid.
+            pasvSocket = PassiveSocket.open(processor);
+        } catch (IOException e) {
+            processor.logError("Can't open passive data port", e);
+            processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open passive connection");
+            return;
         }
-        processor.logDebug("pasvSocket should be running now running="+pasvSocket.isRunning()+" coomplete="+pasvSocket.isComplete()+" error="+pasvSocket.isError()+" output="+pasvSocket.toString());
+        if( !pasvSocket.isIpv4() ) {
+            pasvSocket.abor();
+            processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"PASV requires IPv4, use EPSV");
+            return;
+        }
         processor.setPasvSocket(pasvSocket);
         processor.reply(REPLY_227_ENTERING_PASSIVE_MODE,"Entering Passive Mode ("+pasvSocket.toString()+")");
-
     }
-
 }

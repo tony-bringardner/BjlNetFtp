@@ -252,7 +252,7 @@ public class FtpServer extends Server {
 			}
 		}
 		
-		if( (tmp = System.getProperty(PASIVE_CONTROL_PORT_PROP)) != null ) {
+		if( (tmp = System.getProperty(PASIVE_CONTROL_MAX_PROP)) != null ) {
 			try {
 				PassiveSocket.setMaxControlPort(Integer.parseInt(tmp));
 			} catch (Exception e) {

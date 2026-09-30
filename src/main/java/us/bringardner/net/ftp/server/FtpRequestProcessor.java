@@ -92,6 +92,15 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		}
 
 		/**
+		 * Abort any running transfer without sending a reply (end of session).
+		 */
+		synchronized void abortQuietly() {
+			if( stream.isActive() ) {
+				stream.abort();
+			}
+		}
+
+		/**
 		 * @return true if a data transfer has been started and has not sent its final reply.
 		 */
 		public synchronized boolean isTransferInProgress() {
@@ -436,7 +445,19 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 				logError("An error occured Initializing client.  Closing the channel.",e);					
 			}
 			
-		} 
+		} finally {
+			/*
+			 * RFC 959: an unexpected close on the control connection has the effect of an ABOR.
+			 * Release any passive listener / data socket and stop a running transfer so no
+			 * ports, threads or files are left open after the session ends.
+			 */
+			try {
+				transferInProcess.abortQuietly();
+			} catch (Throwable e) {
+				logDebug("Error aborting transfer at end of session", e);
+			}
+			resetDataConnection();
+		}
 
 	}
 
