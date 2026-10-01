@@ -145,15 +145,13 @@ public class FtpServer extends Server {
 		/**
 		 * The server's one TLS context, whatever the AUTH mechanism (TLS, SSL...).
 		 * Data connections use it too, so they can resume the control connection's session
-		 * (sessions are kept per context). It used to build a new context under the AUTH
-		 * name ("TLS") whenever that differed from the configured protocol (e.g.
-		 * FtpServer.Protocol=TLSv1.3): a new context (and keystore load) for every AUTH, the
-		 * first data connection could never resume the control session, and control and
-		 * data could negotiate different TLS versions (BJL-18).
+		 * (sessions are kept per context). The framework's Server.getSSLContext(String) does
+		 * this since bjl_net_framework 1.0.2 (BJL-38); before that it built a new context
+		 * whenever the AUTH name differed from the configured protocol (BJL-18).
 		 */
 		@Override
 		public SSLContext getSSLContext(String sslOrTsl) throws IOException {
-			return FtpServer.this.getSSLContext();
+			return FtpServer.this.getSSLContext(sslOrTsl);
 		}
 		
 	}
