@@ -33,6 +33,7 @@ import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
@@ -66,11 +67,11 @@ public final class SslEngineSocket extends Socket {
 	private final SSLEngine engine;
 	private final InputStream rawIn;
 	private final OutputStream rawOut;
-	private final Object handshakeLock = new Object();
+	private final ReentrantLock handshakeLock = new ReentrantLock();
 	/** Guards netIn, appIn and inputAtEof. May take writeLock (never the other way round). */
-	private final Object readLock = new Object();
+	private final ReentrantLock readLock = new ReentrantLock();
 	/** Guards netOut and writing to the network. */
-	private final Object writeLock = new Object();
+	private final ReentrantLock writeLock = new ReentrantLock();
 	private final InputStream in = new TlsInput();
 	private final OutputStream out = new TlsOutput();
 
@@ -119,7 +120,8 @@ public final class SslEngineSocket extends Socket {
 		if( handshakeDone ) {
 			return;
 		}
-		synchronized (handshakeLock) {
+		handshakeLock.lock();
+		try {
 			if( handshakeDone ) {
 				return;
 			}
@@ -135,12 +137,15 @@ public final class SslEngineSocket extends Socket {
 					break;
 				case NEED_UNWRAP:
 				case NEED_UNWRAP_AGAIN:
-					synchronized (readLock) {
+					readLock.lock();
+					try {
 						SSLEngineResult r = unwrap();
 						if( r == null ) {
 							throw new SSLHandshakeException("The connection was closed during the TLS handshake");
 						}
 						hs = r.getHandshakeStatus();
+					} finally {
+						readLock.unlock();
 					}
 					break;
 				case NEED_TASK:
@@ -152,6 +157,8 @@ public final class SslEngineSocket extends Socket {
 				}
 			}
 			handshakeDone = true;
+		} finally {
+			handshakeLock.unlock();
 		}
 	}
 
@@ -184,7 +191,8 @@ public final class SslEngineSocket extends Socket {
 
 	/** Wraps from src and sends the result. */
 	private SSLEngineResult wrap(ByteBuffer src) throws IOException {
-		synchronized (writeLock) {
+		writeLock.lock();
+		try {
 			while( true ) {
 				netOut.clear();
 				SSLEngineResult r = engine.wrap(src, netOut);
@@ -204,6 +212,8 @@ public final class SslEngineSocket extends Socket {
 					throw new SSLException("Unexpected wrap status "+r.getStatus());
 				}
 			}
+		} finally {
+			writeLock.unlock();
 		}
 	}
 
@@ -268,7 +278,8 @@ public final class SslEngineSocket extends Socket {
 			return 0;
 		}
 		ensureHandshake();
-		synchronized (readLock) {
+		readLock.lock();
+		try {
 			while( !appIn.hasRemaining() ) {
 				if( inputAtEof ) {
 					return -1;
@@ -292,6 +303,8 @@ public final class SslEngineSocket extends Socket {
 			int n = Math.min(len, appIn.remaining());
 			appIn.get(b, off, n);
 			return n;
+		} finally {
+			readLock.unlock();
 		}
 	}
 
@@ -331,8 +344,11 @@ public final class SslEngineSocket extends Socket {
 
 		@Override
 		public int available() {
-			synchronized (readLock) {
+			readLock.lock();
+			try {
 				return appIn.remaining();
+			} finally {
+				readLock.unlock();
 			}
 		}
 
@@ -356,8 +372,11 @@ public final class SslEngineSocket extends Socket {
 
 		@Override
 		public void flush() throws IOException {
-			synchronized (writeLock) {
+			writeLock.lock();
+			try {
 				rawOut.flush();
+			} finally {
+				writeLock.unlock();
 			}
 		}
 
@@ -391,11 +410,14 @@ public final class SslEngineSocket extends Socket {
 	 */
 	@Override
 	public void close() throws IOException {
-		synchronized (handshakeLock) {
+		handshakeLock.lock();
+		try {
 			if( closed ) {
 				return;
 			}
 			closed = true;
+		} finally {
+			handshakeLock.unlock();
 		}
 		try {
 			if( handshakeDone ) {
@@ -422,7 +444,8 @@ public final class SslEngineSocket extends Socket {
 	 * session reuse refuse. FTP servers close the data connection as soon as the transfer ends.
 	 */
 	private void drainInbound() {
-		synchronized (readLock) {
+		readLock.lock();
+		try {
 			if( inputAtEof ) {
 				return;
 			}
@@ -446,6 +469,8 @@ public final class SslEngineSocket extends Socket {
 			} finally {
 				inputAtEof = true;
 			}
+		} finally {
+			readLock.unlock();
 		}
 	}
 

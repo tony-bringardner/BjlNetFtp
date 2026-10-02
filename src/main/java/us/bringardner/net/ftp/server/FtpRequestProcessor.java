@@ -76,35 +76,55 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	public static final String PARAMETER_DEFAULT_DIRECTORY = "defaultDir";
 
 	public class StreamController {
+		/** A lock, not synchronized: start() sends a reply, which can block (BJL-52). */
+		private final java.util.concurrent.locks.ReentrantLock controlLock = new java.util.concurrent.locks.ReentrantLock();
 		private FtpServerStream stream = new FtpServerStream();
 
 		// Abort the transfer (ABOR)
-		public synchronized void abort() throws IOException {
-			FtpServerStream current = stream;
-			synchronized (current.lock) {
-				if( !current.isActive()) {
-					reply(us.bringardner.net.ftp.FTP.REPLY_226_CLOSING_DATA_CON,"No transfer in progress. ABOR command successful");
-				} else {
-					// The transfer thread sends 426 followed by 226
-					current.abort();
+		public void abort() throws IOException {
+			controlLock.lock();
+			try {
+				FtpServerStream current = stream;
+				current.lock.lock();
+				try {
+					if( !current.isActive()) {
+						reply(us.bringardner.net.ftp.FTP.REPLY_226_CLOSING_DATA_CON,"No transfer in progress. ABOR command successful");
+					} else {
+						// The transfer thread sends 426 followed by 226
+						current.abort();
+					}
+				} finally {
+					current.lock.unlock();
 				}
+			} finally {
+				controlLock.unlock();
 			}
 		}
 
 		/**
 		 * Abort any running transfer without sending a reply (end of session).
 		 */
-		synchronized void abortQuietly() {
-			if( stream.isActive() ) {
-				stream.abort();
+		void abortQuietly() {
+			controlLock.lock();
+			try {
+				if( stream.isActive() ) {
+					stream.abort();
+				}
+			} finally {
+				controlLock.unlock();
 			}
 		}
 
 		/**
 		 * @return true if a data transfer has been started and has not sent its final reply.
 		 */
-		public synchronized boolean isTransferInProgress() {
-			return stream.isActive();
+		public boolean isTransferInProgress() {
+			controlLock.lock();
+			try {
+				return stream.isActive();
+			} finally {
+				controlLock.unlock();
+			}
 		}
 
 		/**
@@ -116,16 +136,21 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		 * 
 		 * @return true if the transfer was started, false if it was refused (a 425 has been sent).
 		 */
-		public synchronized boolean start(FtpServerStream next, String message) throws IOException {
-			if(stream.isActive()) {
-				next.discard();
-				reply(REPLY_425_CANT_OPEN_DATA_CON, "Data transfer already in process");
-				return false;
+		public boolean start(FtpServerStream next, String message) throws IOException {
+			controlLock.lock();
+			try {
+				if(stream.isActive()) {
+					next.discard();
+					reply(REPLY_425_CANT_OPEN_DATA_CON, "Data transfer already in process");
+					return false;
+				}
+				reply(REPLY_150_FILE_STATUS_OK, message);
+				stream = next;
+				next.start();
+				return true;
+			} finally {
+				controlLock.unlock();
 			}
-			reply(REPLY_150_FILE_STATUS_OK, message);
-			stream = next;
-			next.start();
-			return true;
 		}
 
 		public boolean start(FtpServerStream next) throws IOException {
@@ -583,10 +608,21 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		return tempStorage.remove(key);
 	}
 
-	// TODO: Move synchronized to parent project
+	/**
+	 * Serializes replies from the session and its transfer thread. A lock, not synchronized:
+	 * a reply can block on a slow client, and on Java 21-23 a virtual thread blocked inside a
+	 * monitor pins its carrier thread (BJL-52).
+	 */
+	private final java.util.concurrent.locks.ReentrantLock replyLock = new java.util.concurrent.locks.ReentrantLock();
+
 	@Override
-	public synchronized void reply(String text) throws IOException {
-		super.reply(hideRealPaths(text));
+	public void reply(String text) throws IOException {
+		replyLock.lock();
+		try {
+			super.reply(hideRealPaths(text));
+		} finally {
+			replyLock.unlock();
+		}
 	}
 
 	/**
@@ -595,20 +631,30 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	 * {@link #hideRealPaths(String)} like any other reply.
 	 */
 	@Override
-	public synchronized void reply(java.util.List<String> lines) throws IOException {
-		java.util.List<String> safe = new java.util.ArrayList<String>(lines.size());
-		for (String line : lines) {
-			safe.add(hideRealPaths(line));
+	public void reply(java.util.List<String> lines) throws IOException {
+		replyLock.lock();
+		try {
+			java.util.List<String> safe = new java.util.ArrayList<String>(lines.size());
+			for (String line : lines) {
+				safe.add(hideRealPaths(line));
+			}
+			super.reply(safe);
+		} finally {
+			replyLock.unlock();
 		}
-		super.reply(safe);
 	}
 
 	/**
 	 * A one-line reply sent as is, without {@link #hideRealPaths(String)}. Only for text the
 	 * client supplied itself, such as the path an administrator gave to SITE root.
 	 */
-	public synchronized void replyAsIs(int responseCode, String text) throws IOException {
-		super.reply(translateResponseCode(responseCode)+" "+text);
+	public void replyAsIs(int responseCode, String text) throws IOException {
+		replyLock.lock();
+		try {
+			super.reply(translateResponseCode(responseCode)+" "+text);
+		} finally {
+			replyLock.unlock();
+		}
 	}
 
 	/**
@@ -690,35 +736,40 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	 * no code, which a client can't parse (BJL-26).
 	 */
 	@Override
-	public synchronized void reply(int responseCode, String text) throws IOException {
-		String t = text == null ? "" : text;
-		if( t.indexOf('\n') < 0 && t.indexOf('\r') < 0 ) {
-			super.reply(responseCode, t);
-			return;
-		}
-		String[] lines = t.split("\r\n|\r|\n", -1);
-		int last = lines.length-1;
-		while( last > 0 && lines[last].trim().isEmpty()) {
-			last--;
-		}
-		if( last == 0 ) {
-			super.reply(responseCode, lines[0]);
-			return;
-		}
-		String code = translateResponseCode(responseCode);
-		java.util.List<String> out = new java.util.ArrayList<String>(last+1);
-		out.add(code+"-"+lines[0]);
-		for (int idx = 1; idx < last; idx++) {
-			String line = lines[idx];
-			// a line in the middle must not look like a reply of its own (RFC 959 4.2)
-			if( line.length() >= 3 && Character.isDigit(line.charAt(0)) && Character.isDigit(line.charAt(1)) && Character.isDigit(line.charAt(2))) {
-				line = " "+line;
+	public void reply(int responseCode, String text) throws IOException {
+		replyLock.lock();
+		try {
+			String t = text == null ? "" : text;
+			if( t.indexOf('\n') < 0 && t.indexOf('\r') < 0 ) {
+				super.reply(responseCode, t);
+				return;
 			}
-			out.add(line);
+			String[] lines = t.split("\r\n|\r|\n", -1);
+			int last = lines.length-1;
+			while( last > 0 && lines[last].trim().isEmpty()) {
+				last--;
+			}
+			if( last == 0 ) {
+				super.reply(responseCode, lines[0]);
+				return;
+			}
+			String code = translateResponseCode(responseCode);
+			java.util.List<String> out = new java.util.ArrayList<String>(last+1);
+			out.add(code+"-"+lines[0]);
+			for (int idx = 1; idx < last; idx++) {
+				String line = lines[idx];
+				// a line in the middle must not look like a reply of its own (RFC 959 4.2)
+				if( line.length() >= 3 && Character.isDigit(line.charAt(0)) && Character.isDigit(line.charAt(1)) && Character.isDigit(line.charAt(2))) {
+					line = " "+line;
+				}
+				out.add(line);
+			}
+			out.add(code+" "+lines[last]);
+			// one flush for the whole reply (BJL-35)
+			reply(out);
+		} finally {
+			replyLock.unlock();
 		}
-		out.add(code+" "+lines[last]);
-		// one flush for the whole reply (BJL-35)
-		reply(out);
 	}
 
 	public Object getTempValue(String key){
@@ -874,6 +925,8 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	 */
 	public void transferStream(InputStream in, OutputStream out, Socket sock, boolean upload, FtpServerStream.CompletionHandler handler) throws IOException{
 		FtpServerStream s = new FtpServerStream(this, in, out, sock, upload, handler);
+		// The transfer runs on the same kind of thread as its session (VirtualThreads, BJL-52)
+		s.setVirtual(isVirtualThread());
 		transferInProcess.start(s);
 	}
 

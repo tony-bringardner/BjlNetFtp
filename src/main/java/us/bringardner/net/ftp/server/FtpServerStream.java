@@ -82,7 +82,12 @@ public class FtpServerStream extends BaseThread {
 		return t;
 	});
 
-	public final Object lock = new Object();
+	/**
+	 * Held while the transfer marks itself finished and sends its final reply, and by ABOR, so
+	 * ABOR's reply follows ours. A lock, not a monitor: replies can block on a slow client and
+	 * on Java 21-23 a virtual thread blocked inside a monitor pins its carrier thread (BJL-52).
+	 */
+	final java.util.concurrent.locks.ReentrantLock lock = new java.util.concurrent.locks.ReentrantLock();
 	final FtpRequestProcessor processor;
 	private final InputStream input;
 	private final OutputStream output;
@@ -331,7 +336,8 @@ public class FtpServerStream extends BaseThread {
 				}
 			}
 
-			synchronized (lock) {
+			lock.lock();
+			try {
 				/*
 				 * Mark the transfer finished BEFORE sending the final reply. The client may send
 				 * its next command (e.g. PASV + RETR) the instant it reads the 226; if we are still
@@ -363,6 +369,8 @@ public class FtpServerStream extends BaseThread {
 				} finally {
 					finished = true;
 				}
+			} finally {
+				lock.unlock();
 			}
 		} catch (Throwable e) {
 			processor.logError("Error completing transfer", e);

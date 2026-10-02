@@ -62,6 +62,12 @@ public  class PassiveSocket {
 	private final InetAddress advertisedAddress;
 	private final int port;
 	private ServerSocket serverSocket;
+	/**
+	 * Guards serverSocket, dataSocket and closed. A lock, not synchronized: getDataSocket() waits
+	 * in accept(), and on Java 21-23 a virtual thread blocked inside a monitor pins its carrier
+	 * thread (BJL-52).
+	 */
+	private final java.util.concurrent.locks.ReentrantLock lock = new java.util.concurrent.locks.ReentrantLock();
 	private Socket dataSocket;
 	private boolean closed = false;
 
@@ -127,16 +133,21 @@ public  class PassiveSocket {
 	/**
 	 * Close the listening socket and any accepted data socket.
 	 */
-	public synchronized void abor() {
-		closed = true;
-		closeServerSocket();
-		if( dataSocket != null ) {
-			try {
-				dataSocket.close();
-			} catch(Exception ex) {
-				processor.logDebug("Error closing passive data socket", ex);
+	public void abor() {
+		lock.lock();
+		try {
+			closed = true;
+			closeServerSocket();
+			if( dataSocket != null ) {
+				try {
+					dataSocket.close();
+				} catch(Exception ex) {
+					processor.logDebug("Error closing passive data socket", ex);
+				}
+				dataSocket = null;
 			}
-			dataSocket = null;
+		} finally {
+			lock.unlock();
 		}
 	}
 
@@ -156,44 +167,49 @@ public  class PassiveSocket {
 	 * @return the connected data socket, or null if the client did not connect in time
 	 * or this passive socket was closed.
 	 */
-	public synchronized Socket getDataSocket() {
-		if( dataSocket != null || closed ) {
-			return dataSocket;
-		}
+	public Socket getDataSocket() {
+		lock.lock();
 		try {
-			int timeout = serverSocket.getSoTimeout();
-			long deadline = System.currentTimeMillis() + timeout;
-			while( dataSocket == null ) {
-				Socket s = serverSocket.accept();
-				if( processor.isAllowedPassivePeer(s.getInetAddress()) ) {
-					dataSocket = s;
-				} else {
-					// RFC 2577: don't let a third party steal the data connection
-					processor.logInfo("Rejected passive data connection from "+s.getInetAddress().getHostAddress()
-							+" (control connection is from "+processor.getConnection().getSocket().getInetAddress().getHostAddress()+")");
-					try {
-						s.close();
-					} catch (IOException e) {
+			if( dataSocket != null || closed ) {
+				return dataSocket;
+			}
+			try {
+				int timeout = serverSocket.getSoTimeout();
+				long deadline = System.currentTimeMillis() + timeout;
+				while( dataSocket == null ) {
+					Socket s = serverSocket.accept();
+					if( processor.isAllowedPassivePeer(s.getInetAddress()) ) {
+						dataSocket = s;
+					} else {
+						// RFC 2577: don't let a third party steal the data connection
+						processor.logInfo("Rejected passive data connection from "+s.getInetAddress().getHostAddress()
+								+" (control connection is from "+processor.getConnection().getSocket().getInetAddress().getHostAddress()+")");
+						try {
+							s.close();
+						} catch (IOException e) {
+						}
+						long remaining = deadline - System.currentTimeMillis();
+						if( remaining <= 0 ) {
+							throw new SocketTimeoutException("No valid passive data connection");
+						}
+						serverSocket.setSoTimeout((int)remaining);
 					}
-					long remaining = deadline - System.currentTimeMillis();
-					if( remaining <= 0 ) {
-						throw new SocketTimeoutException("No valid passive data connection");
-					}
-					serverSocket.setSoTimeout((int)remaining);
 				}
+				dataSocket.setSoTimeout(processor.getActivityTimeOut());
+			} catch (SocketTimeoutException e) {
+				processor.logDebug("Timed out waiting for passive data connection on port "+port);
+			} catch (IOException e) {
+				if( !closed ) {
+					processor.logError("Error accepting passive data connection on port "+port, e);
+				}
+			} finally {
+				// One connection per PASV.
+				closeServerSocket();
 			}
-			dataSocket.setSoTimeout(processor.getActivityTimeOut());
-		} catch (SocketTimeoutException e) {
-			processor.logDebug("Timed out waiting for passive data connection on port "+port);
-		} catch (IOException e) {
-			if( !closed ) {
-				processor.logError("Error accepting passive data connection on port "+port, e);
-			}
+			return dataSocket;
 		} finally {
-			// One connection per PASV.
-			closeServerSocket();
+			lock.unlock();
 		}
-		return dataSocket;
 	}
 
 	public static synchronized int getMinControlPort() {
