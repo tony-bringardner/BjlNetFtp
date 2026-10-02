@@ -228,6 +228,50 @@ public class TestSymlinkPolicy {
 		}
 	}
 
+	/** Neither the root's absolute nor its canonical (real) path may appear in a reply (BJL-48). */
+	private static void assertNoRealPath(String reply) throws IOException {
+		for (String real : new String[] { root.getAbsolutePath(), root.getCanonicalPath(), base.getAbsolutePath() }) {
+			assertTrue(!reply.contains(real), "reply reveals " + real + ": " + reply);
+		}
+	}
+
+	@Test
+	public void mlstShowsOnlyTheClientsPath() throws Exception {
+		try (Session s = new Session(PORT)) {
+			s.send("MLST inside.txt");
+			String reply = s.expect(250).text;
+			assertNoRealPath(reply);
+			String[] lines = reply.split("\n");
+			assertEquals("- Listing /inside.txt", lines[0].trim());
+			// RFC 3659 section 7.2: facts, a space, then the pathname
+			assertTrue(lines[1].startsWith(" ") && lines[1].endsWith(" /inside.txt"), lines[1]);
+			assertEquals("file", fact(lines[1].trim().split(" ")[0].toLowerCase(), "type"));
+
+			s.send("MLST");
+			reply = s.expect(250).text;
+			assertNoRealPath(reply);
+			assertEquals("- Listing /", reply.split("\n")[0].trim());
+		}
+	}
+
+	@Test
+	public void errorMessagesDontRevealTheRealPath() throws Exception {
+		File readOnly = new File(root, "readonly");
+		assertTrue(readOnly.mkdirs() || readOnly.isDirectory());
+		Assumptions.assumeTrue(readOnly.setWritable(false) && !readOnly.canWrite(), "can't make a read-only directory here");
+		try (Session s = new Session(PORT)) {
+			try (java.net.Socket data = s.pasv()) {
+				s.send("STOR readonly/x.txt");
+				TestTransferReliability.Reply r = s.read(5000);
+				assertEquals(553, r.code, r.text);
+				assertNoRealPath(r.text);
+				assertTrue(r.text.contains("/readonly/"), "the client's path is still shown: " + r.text);
+			}
+		} finally {
+			readOnly.setWritable(true);
+		}
+	}
+
 	private static int size(Session s, String path) throws IOException {
 		s.send("SIZE " + path);
 		return s.read(5000).code;

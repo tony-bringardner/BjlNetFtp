@@ -234,7 +234,8 @@ public class Site  extends BaseCommand  implements FtpCommand {
 		processor.logInfo("Set root to "+newRoot);
 
 		// the path as given (the root object's text could show more of the server's file system)
-		processor.reply(REPLY_200_OK,"Root is "+path);
+		// the administrator's own input, so not filtered by hideRealPaths (BJL-48)
+		processor.replyAsIs(REPLY_200_OK,"Root is "+path);
 	}
 
 	/**

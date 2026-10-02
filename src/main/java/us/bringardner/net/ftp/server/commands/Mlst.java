@@ -209,8 +209,17 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 		} 
 
 	
-		processor.reply(REPLY_250_FILE_ACTION_OK+"- Listing for "+target);
-		processor.reply(" "+formatFile(target,processor));
+		/*
+		 * RFC 3659 section 7.2: the entry ends with the object's pathname. Both lines use the
+		 * path the client sees: the first line used to show the FileSource itself, i.e. the
+		 * server's real path (BJL-48).
+		 */
+		String path = processor.getVirtualPath(target);
+		String entry = formatFile(target, processor).trim();
+		// formatFile ends with the bare name; MLST shows the whole pathname
+		entry = entry.substring(0, entry.length()-target.getName().length())+path;
+		processor.reply(REPLY_250_FILE_ACTION_OK+"- Listing "+path);
+		processor.reply(" "+entry);
 		processor.reply(REPLY_250_FILE_ACTION_OK,"End");
 	}
 

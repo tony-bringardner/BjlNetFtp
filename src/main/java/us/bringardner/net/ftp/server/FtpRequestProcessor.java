@@ -587,7 +587,88 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	// TODO: Move synchronized to parent project
 	@Override
 	public synchronized void reply(String text) throws IOException {
-		super.reply(text);
+		super.reply(hideRealPaths(text));
+	}
+
+	/**
+	 * A one-line reply sent as is, without {@link #hideRealPaths(String)}. Only for text the
+	 * client supplied itself, such as the path an administrator gave to SITE root.
+	 */
+	public synchronized void replyAsIs(int responseCode, String text) throws IOException {
+		super.reply(translateResponseCode(responseCode)+" "+text);
+	}
+
+	/**
+	 * Replace the server's real path of the user's root in reply text with the path the client
+	 * sees ("/srv/ftp/tony/a.txt" becomes "/a.txt"). Every reply goes through here, so error
+	 * messages that quote a path (an exception's message, for example) don't reveal where the
+	 * files really are (BJL-48; PWD and CWD show only virtual paths since BJL-17).
+	 * @param text a reply
+	 * @return the text with the real root path removed
+	 */
+	public String hideRealPaths(String text) {
+		if( text == null ) {
+			return null;
+		}
+		String ret = text;
+		for (String root : realRootForms()) {
+			ret = removeRoot(ret, root);
+		}
+		return ret;
+	}
+
+	/** The ways the root's real path can appear: canonical and absolute, / and native separators. */
+	private java.util.Set<String> realRootForms() {
+		java.util.Set<String> ret = new java.util.LinkedHashSet<String>();
+		for (String p : new String[] { rootName, rootAbsolute, rootCanonical, ftpRoot == null ? null : ftpRoot.getAbsolutePath() }) {
+			if( p != null && !p.equals("Undefined") ) {
+				String slash = p.replace('\\', '/');
+				while( slash.length() > 1 && slash.endsWith("/") ) {
+					slash = slash.substring(0, slash.length()-1);
+				}
+				// a root of "/" (or "C:/") has nothing to hide
+				if( slash.length() > 1 && !slash.matches("[A-Za-z]:/?") ) {
+					ret.add(slash);
+					ret.add(slash.replace('/', '\\'));
+				}
+			}
+		}
+		return ret;
+	}
+
+	/** Remove root where it is a whole path prefix: followed by a separator or the end of the path. */
+	private static String removeRoot(String text, String root) {
+		StringBuilder ret = null;
+		int from = 0;
+		int idx;
+		while( (idx = text.indexOf(root, from)) >= 0 ) {
+			int end = idx + root.length();
+			char next = end < text.length() ? text.charAt(end) : ' ';
+			boolean separator = next == '/' || next == '\\';
+			boolean pathEnd = !separator && !Character.isLetterOrDigit(next) && next != '.' && next != '_' && next != '-';
+			if( separator || pathEnd ) {
+				if( ret == null ) {
+					ret = new StringBuilder(text.length());
+				}
+				ret.append(text, from, idx);
+				if( pathEnd ) {
+					// the root itself
+					ret.append('/');
+				}
+				from = end;
+			} else {
+				if( ret == null ) {
+					ret = new StringBuilder(text.length());
+				}
+				ret.append(text, from, end);
+				from = end;
+			}
+		}
+		if( ret == null ) {
+			return text;
+		}
+		ret.append(text, from, text.length());
+		return ret.toString();
 	}
 
 	/**
