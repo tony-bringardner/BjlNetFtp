@@ -39,6 +39,12 @@ public class TestListingTransfer {
 
 	private static final int PORT = 8042;
 	private static final int FILES = 3000;
+	/**
+	 * Long names, so even NLST of this directory (about 650 KB) is far bigger than the socket
+	 * buffers. Names stay around 110 characters so the full path is under Windows' 260
+	 * character limit.
+	 */
+	private static final int LONG_NAME_FILES = 6000;
 	private static FtpServer server;
 	private static File root;
 
@@ -50,6 +56,15 @@ public class TestListingTransfer {
 		File big = new File(root, "big");
 		big.mkdirs();
 		new File(root, "empty").mkdirs();
+		File longNames = new File(root, "long");
+		longNames.mkdirs();
+		String pad = "x".repeat(100);
+		for (int i = 0; i < LONG_NAME_FILES; i++) {
+			File f = new File(longNames, String.format("%05d-%s.txt", i, pad));
+			if (!f.exists()) {
+				Files.write(f.toPath(), new byte[] { 'x' });
+			}
+		}
 		for (int i = 0; i < FILES; i++) {
 			File f = new File(big, String.format("file-%05d-été.txt", i));
 			if (!f.exists()) {
@@ -106,12 +121,17 @@ public class TestListingTransfer {
 	public void droppedDataConnectionGets426AndTheSessionContinues(String command) throws Exception {
 		try (Control c = new Control()) {
 			int port = c.epsv();
-			// connect, then reset the connection before the server writes anything
-			Socket data = new Socket(InetAddress.getLoopbackAddress(), port);
+			// A small receive window, so the server is still writing (a listing of about 650 KB)
+			// when the connection is reset. Resetting only after the 150 reply: a connection reset
+			// before the server accepts it is dropped from the accept queue on macOS/BSD, so the
+			// server would just wait for another one.
+			Socket data = new Socket();
+			data.setReceiveBufferSize(4096);
+			data.connect(new java.net.InetSocketAddress(InetAddress.getLoopbackAddress(), port), 5000);
+			c.send(command + " long");
+			assertEquals(150, c.code(c.reply()));
 			data.setSoLinger(true, 0);
 			data.close();
-			c.send(command + " big");
-			assertEquals(150, c.code(c.reply()));
 			assertEquals(426, c.code(c.reply()));
 			c.send("NOOP");
 			assertEquals(200, c.code(c.reply()), "the control connection must stay usable");

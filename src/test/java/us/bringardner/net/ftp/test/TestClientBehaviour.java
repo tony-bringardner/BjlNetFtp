@@ -155,9 +155,13 @@ public class TestClientBehaviour {
 	 */
 	@Test
 	public void dataSocketsUseTheOsBufferSizeByDefault() throws Exception {
+		// The OS default for a connected loopback socket (an unconnected socket can report a
+		// different value: on macOS 131072 before connect, 408300 after)
 		int osDefault;
-		try (java.net.Socket fresh = new java.net.Socket()) {
-			osDefault = fresh.getReceiveBufferSize();
+		try (java.net.ServerSocket ss = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress());
+				java.net.Socket plain = new java.net.Socket(java.net.InetAddress.getLoopbackAddress(), ss.getLocalPort());
+				java.net.Socket accepted = ss.accept()) {
+			osDefault = plain.getReceiveBufferSize();
 		}
 		assertEquals(osDefault, passiveDataSocketBuffer(0), "receive buffer left to the OS");
 
