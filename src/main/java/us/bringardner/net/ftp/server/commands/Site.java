@@ -41,7 +41,7 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  *
  */
-public class Site  extends BaseCommand  implements FtpCommand {
+public class Site  extends BaseCommand {
 
 	
 

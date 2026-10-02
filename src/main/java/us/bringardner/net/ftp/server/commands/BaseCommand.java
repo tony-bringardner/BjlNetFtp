@@ -133,7 +133,7 @@ public abstract class BaseCommand implements FtpCommand ,FTP {
 	 * 
 	 */
 	public BaseCommand(String command) {
-		this.name = command.toUpperCase();
+		this.name = command.toUpperCase(java.util.Locale.ROOT);
 		help = "No help availibl for "+name;		
 	}
 

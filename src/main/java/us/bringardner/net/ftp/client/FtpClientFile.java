@@ -308,7 +308,7 @@ public class FtpClientFile extends BaseObject {
 
 		for (int idx = 0,sz=parts.length; idx < sz; idx++) {
 			String [] tmp = parts[idx].split("=");
-			String fact = tmp[0].trim().toUpperCase();
+			String fact = tmp[0].trim().toUpperCase(java.util.Locale.ROOT);
 			if( fact.equals(FTP.MODIFY)) {
 				/*
 				 *    Symbolically, a time-val may be viewed as
@@ -326,7 +326,7 @@ public class FtpClientFile extends BaseObject {
 				}
 			} else if( fact.equals(FTP.PERM)) {
 				if( tmp.length > 1) {
-					mlstPermissions = tmp[1].toLowerCase();
+					mlstPermissions = tmp[1].toLowerCase(java.util.Locale.ROOT);
 				}
 			} else if( fact.equals(FTP.SIZE)) {
 				length = Long.parseLong(tmp[1]);

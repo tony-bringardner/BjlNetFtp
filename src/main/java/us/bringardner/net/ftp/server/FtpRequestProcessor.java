@@ -158,7 +158,6 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	private transient PassiveSocket pasvSocket; 	
 	private boolean passive = false;
 	private transient Socket dataSocket;
-	private long lastActivity = 0;
 
 	//  Time out if inactive
 	private int activityTimeOut = 10 * (60*1000);
@@ -779,7 +778,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			super.run();	
 
 		} catch (Throwable e) {
-			if (!((e instanceof SocketException) && e.toString().toLowerCase().contains("closed") )) {
+			if (!((e instanceof SocketException) && e.toString().toLowerCase(java.util.Locale.ROOT).contains("closed") )) {
 				logError("An error occured Initializing client.  Closing the channel.",e);					
 			}
 			
@@ -860,12 +859,6 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 
-	/**
-	 * 
-	 */
-	private void touch() {
-		lastActivity = System.currentTimeMillis();
-	}
 
 	public void transferStream(InputStream in, OutputStream out, Socket sock) throws IOException{
 		transferStream(in, out, sock, false, null);
@@ -995,7 +988,11 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			 */
 			String tmp = System.getProperty("JavaFtpServer.linger");
 			if( tmp != null ) {
-				try { this.linger = Integer.parseInt(tmp); } catch(Exception ex) {}
+				try {
+					this.linger = Integer.parseInt(tmp);
+				} catch(NumberFormatException ex) {
+					logError("JavaFtpServer.linger is not a number: "+tmp);
+				}
 			}
 		}
 		return this.linger;
@@ -1363,8 +1360,17 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		}
 	}
 
+	/**
+	 * @return when the client last sent or was sent something on the control connection
+	 * (ms since the epoch), 0 if not connected. This used to be a field that was never
+	 * updated, so it was always 0.
+	 */
 	public long getLastActivity() {
-		return lastActivity;
+		us.bringardner.net.framework.IConnection con = getConnection();
+		if( con == null ) {
+			return 0;
+		}
+		return Math.max(con.getLastReadTime(), con.getLastWriteTime());
 	}
 
 	/**

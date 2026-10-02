@@ -258,7 +258,7 @@ Internet Draft        draft-ietf-ftpext-mlst-16.txt       September 2002
         	 * Set the wanted parameters.  
         	 * If any are unsupported, it's an error.
         	 */
-        	parts = parts[2].toUpperCase().split(";");
+        	parts = parts[2].toUpperCase(java.util.Locale.ROOT).split(";");
         	
         	 Map<String, Integer> supported = Mlst.getSupportedFacts();
         	

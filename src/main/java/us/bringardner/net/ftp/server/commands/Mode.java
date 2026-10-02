@@ -40,7 +40,7 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  *
  */
-public class Mode extends BaseCommand implements FtpCommand {
+public class Mode extends BaseCommand {
 
 	private static final long serialVersionUID = 1L;
 
@@ -81,7 +81,7 @@ public class Mode extends BaseCommand implements FtpCommand {
 		}
 		
 		boolean ok = false;
-		switch(args[1].toLowerCase().charAt(0)){
+		switch(args[1].toLowerCase(java.util.Locale.ROOT).charAt(0)){
 			case 's': ok = true;
 					break;
 			default:

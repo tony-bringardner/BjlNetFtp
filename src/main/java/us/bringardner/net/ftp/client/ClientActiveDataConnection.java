@@ -37,10 +37,11 @@ import java.io.IOException;
  * @author Tony Bringardner
  *
  */
-public class ClientActiveDataConnection extends ClientDataTransferProcess {
+public final class ClientActiveDataConnection extends ClientDataTransferProcess {
 
     public ClientActiveDataConnection(FtpClient client) throws IOException {
-        setClient(client);
+        super(client);
+        getLogger().setLevel(client.getLogger().getLevel());
         setPassive(false);
 
         /*

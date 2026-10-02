@@ -86,7 +86,7 @@ public class TestClientBehaviour {
 			try (InputStream in = c.getInputStream("small.txt", true)) {
 				in.readAllBytes();
 			}
-			assertTrue(c.dialog.toString().contains("Write:TYPE A"), "ascii flag was ignored: " + c.dialog);
+			assertTrue(c.getDialog().contains("Write:TYPE A"), "ascii flag was ignored: " + c.getDialog());
 		} finally {
 			c.close();
 		}
@@ -110,25 +110,25 @@ public class TestClientBehaviour {
 					in.readAllBytes();
 				}
 			}
-			assertEquals(1, count(c.dialog.toString(), "Write:TYPE I"), c.dialog.toString());
+			assertEquals(1, count(c.getDialog(), "Write:TYPE I"), c.getDialog());
 			try (InputStream in = c.getInputStream("small.txt", true)) {
 				in.readAllBytes();
 			}
 			try (InputStream in = c.getInputStream("small.txt", true)) {
 				in.readAllBytes();
 			}
-			assertEquals(1, count(c.dialog.toString(), "Write:TYPE A"));
+			assertEquals(1, count(c.getDialog(), "Write:TYPE A"));
 			try (InputStream in = c.getInputStream("small.txt")) {
 				in.readAllBytes();
 			}
-			assertEquals(2, count(c.dialog.toString(), "Write:TYPE I"));
+			assertEquals(2, count(c.getDialog(), "Write:TYPE I"));
 
 			// a TYPE sent by hand makes the client send its own again
 			c.executeCommand("TYPE A");
 			try (InputStream in = c.getInputStream("small.txt")) {
 				assertEquals("hello", new String(in.readAllBytes()));
 			}
-			assertEquals(3, count(c.dialog.toString(), "Write:TYPE I"));
+			assertEquals(3, count(c.getDialog(), "Write:TYPE I"));
 		} finally {
 			c.close();
 		}
@@ -147,7 +147,7 @@ public class TestClientBehaviour {
 			try (InputStream in = c.getInputStream("small.txt")) {
 				in.readAllBytes();
 			}
-			assertEquals(2, count(c.dialog.toString(), "Write:TYPE I"), c.dialog.toString());
+			assertEquals(2, count(c.getDialog(), "Write:TYPE I"), c.getDialog());
 		} finally {
 			c.close();
 		}
@@ -306,7 +306,7 @@ public class TestClientBehaviour {
 			try (InputStream in = c.getInputStream("small.txt")) {
 				assertEquals("hello", new String(in.readAllBytes()));
 			}
-			String d = c.dialog.toString();
+			String d = c.getDialog();
 			assertTrue(d.contains("Write:EPSV") && !d.contains("Write:PASV"), d);
 		} finally {
 			c.close();
@@ -344,7 +344,7 @@ public class TestClientBehaviour {
 			try (InputStream in = c.getInputStream("active-up.txt")) {
 				assertEquals("active", new String(in.readAllBytes()));
 			}
-			assertTrue(c.dialog.toString().contains("Write:PORT 127,0,0,1,"), c.dialog.toString());
+			assertTrue(c.getDialog().contains("Write:PORT 127,0,0,1,"), c.getDialog());
 		} finally {
 			c.close();
 		}

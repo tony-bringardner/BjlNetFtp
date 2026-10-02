@@ -175,7 +175,7 @@ public class FtpCommandFactory implements ICommandFactory {
 	}
 
 	public ICommand getCommand(String name) {
-		ICommand ret = commands.get(name.toUpperCase());
+		ICommand ret = commands.get(name.toUpperCase(java.util.Locale.ROOT));
 		
 		return ret;
 	}

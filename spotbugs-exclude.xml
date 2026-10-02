@@ -34,4 +34,47 @@
 		<Field name="parent"/>
 		<Bug pattern="IS2_INCONSISTENT_SYNC"/>
 	</Match>
+
+	<!--
+	  The threshold is Low since BJL-5; these Low findings are accepted.
+
+	  FtpServer's constructor calls getLogger() and (through initMe) getAccessControl() to set
+	  itself up. FtpServer is meant to be subclassed; an override that needs fields of the
+	  subclass must not rely on them in these methods during construction.
+	-->
+	<Match>
+		<Class name="us.bringardner.net.ftp.server.FtpServer"/>
+		<Bug pattern="MC_OVERRIDABLE_METHOD_CALL_IN_CONSTRUCTOR"/>
+	</Match>
+
+	<!--
+	  FtpRequestProcessor is Serializable only because its framework base class is; a session
+	  (a thread with live sockets) is never serialized, so the transient transfer controller
+	  never needs restoring.
+	-->
+	<Match>
+		<Class name="us.bringardner.net.ftp.server.FtpRequestProcessor"/>
+		<Field name="transferInProcess"/>
+		<Bug pattern="SE_TRANSIENT_FIELD_NOT_RESTORED"/>
+	</Match>
+
+	<!--
+	  FtpClientFile.splitMlsxEntry returns null to mean "not an MLSx entry" (documented);
+	  an empty array would read as an entry with no parts. BjlFileSystemFtp relies on it.
+	-->
+	<Match>
+		<Class name="us.bringardner.net.ftp.client.FtpClientFile"/>
+		<Method name="splitMlsxEntry"/>
+		<Bug pattern="PZLA_PREFER_ZERO_LENGTH_ARRAYS"/>
+	</Match>
+
+	<!--
+	  FtpServerStream.closeQuietly closes streams and sockets after a transfer's result has
+	  been decided and reported; a failure to close changes nothing.
+	-->
+	<Match>
+		<Class name="us.bringardner.net.ftp.server.FtpServerStream"/>
+		<Method name="closeQuietly"/>
+		<Bug pattern="DE_MIGHT_IGNORE"/>
+	</Match>
 </FindBugsFilter>

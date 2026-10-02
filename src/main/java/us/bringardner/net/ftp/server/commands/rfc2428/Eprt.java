@@ -46,7 +46,7 @@ import us.bringardner.net.ftp.server.commands.BaseCommand;
  * @author Tony Bringardner
  *
  */
-public class Eprt extends BaseCommand implements FtpCommand {
+public class Eprt extends BaseCommand {
 
 	private static final long serialVersionUID = 1L;
 

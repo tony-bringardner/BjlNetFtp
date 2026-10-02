@@ -456,7 +456,8 @@ public abstract class TestFtpBaseTestClass {
 		assertEquals(""+APPE_TEXT.length(), parts[++pos],"Size does not match"+parts[pos]);
 
 
-		String tmp = cal.getDisplayName(Calendar.MONTH, Calendar.SHORT_FORMAT, Locale.getDefault());
+		// LIST month names are always English (like ls in the C locale)
+		String tmp = cal.getDisplayName(Calendar.MONTH, Calendar.SHORT_FORMAT, Locale.US);
 		assertEquals(tmp, parts[++pos],"Month does not match"+parts[pos]);
 
 		assertEquals(""+cal.get(Calendar.DAY_OF_MONTH), parts[++pos],"Day does not match"+parts[pos]);

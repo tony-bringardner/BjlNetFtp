@@ -52,7 +52,7 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  *
  */
-public class List  extends BaseCommand  implements FtpCommand {
+public class List  extends BaseCommand {
 
 	private static final long serialVersionUID = 1L;
 	// long arithmetic: the int version overflowed to about 17 days

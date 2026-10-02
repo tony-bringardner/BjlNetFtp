@@ -156,7 +156,7 @@ public class TestTlsDataChannel {
 			try (InputStream in = client.getInputStream("up-explicit.txt")) {
 				assertArrayEquals(CONTENT, in.readAllBytes());
 			}
-			String dialog = client.dialog.toString();
+			String dialog = client.getDialog();
 			assertTrue(dialog.contains("Write:PBSZ 0") && dialog.contains("Write:PROT P"), dialog);
 		} finally {
 			client.close();
@@ -172,10 +172,10 @@ public class TestTlsDataChannel {
 		try {
 			assertTrue(client.connect("anonymous", "x", null));
 			client.close();
-			int before = count(client.dialog.toString(), "Write:AUTH TLS");
+			int before = count(client.getDialog(), "Write:AUTH TLS");
 			// Before the fix, a reconnect skipped AUTH and sent USER/PASS in clear text
 			assertTrue(client.connect("anonymous", "x", null));
-			assertEquals(before + 1, count(client.dialog.toString(), "Write:AUTH TLS"), "reconnect did not send AUTH");
+			assertEquals(before + 1, count(client.getDialog(), "Write:AUTH TLS"), "reconnect did not send AUTH");
 			assertTrue(client.isChannelSecure());
 			try (InputStream in = client.getInputStream("file.txt")) {
 				assertArrayEquals(CONTENT, in.readAllBytes());

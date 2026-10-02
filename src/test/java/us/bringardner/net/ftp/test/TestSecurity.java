@@ -242,7 +242,7 @@ public class TestSecurity {
 		try {
 			assertTrue(client.connect("anonymous", "SuperSecret-123", null), "can't connect");
 			client.executePwd();
-			String dialog = client.dialog.toString();
+			String dialog = client.getDialog();
 			assertTrue(dialog.contains("PASS ****"), "PASS should be masked: " + dialog);
 			assertFalse(dialog.contains("SuperSecret-123"), "password leaked into the client dialog");
 		} finally {

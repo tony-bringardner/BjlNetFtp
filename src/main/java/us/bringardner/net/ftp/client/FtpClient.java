@@ -123,7 +123,17 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private boolean useSsl;
 	private volatile Socket socket;
 	private volatile SSLSocket sslSocket;
-	public StringBuilder dialog = new StringBuilder();
+	private final StringBuilder dialog = new StringBuilder();
+
+	/**
+	 * @return the commands and replies of this client so far (passwords hidden), for
+	 * debugging and tests
+	 */
+	public String getDialog() {
+		synchronized (dialog) {
+			return dialog.toString();
+		}
+	}
 	/**
 	 * The representation type the server has accepted on this connection (A or I), or null
 	 * when unknown; TYPE is only sent when it changes (BJL-34).
@@ -1268,7 +1278,7 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	/**
 	 * @return true is currently connected to a server.
 	 */
-	public boolean isConnected() {
+	public synchronized boolean isConnected() {
 		return connected;
 	}
 
@@ -1286,7 +1296,8 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 			String tmp = resp.getResponseText().trim();
 			try {
 				ret = Long.parseLong(tmp);	
-			} catch (Exception e) {
+			} catch (NumberFormatException e) {
+				logDebug("SIZE reply is not a number: "+tmp);
 			}
 		}
 
@@ -1536,6 +1547,7 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 				try {
 					in.close();
 				} catch (Exception e) {
+					logDebug("Error closing listing stream", e);
 				}
 			}
 			// releases the socket or active listener if the command was refused
@@ -1719,7 +1731,7 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 			if( res.isPositiveComplet()) {
 
 				String[] lines = res.getResponseText().split("\n");
-				if( lines != null && lines.length>2) {
+				if( lines.length>2) {
 					/**
 
                     Replies to the FEAT command MUST comply with the following syntax.
@@ -1884,7 +1896,11 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 
 		// With the host (it was null), Java caches the session under this host and port,
 		// which is what lets data connections resume it (see secureDataSocket, BJL-18)
-		sslSocket = (SSLSocket)factory.createSocket(socket,getHost(), socket.getPort(), false);
+		Socket layered = factory.createSocket(socket,getHost(), socket.getPort(), false);
+		if( !(layered instanceof SSLSocket) ) {
+			throw new IOException("TLS socket factory returned "+layered.getClass().getName());
+		}
+		sslSocket = (SSLSocket) layered;
 		sslSocket.setWantClientAuth(false);
 		sslSocket.startHandshake();
 		channelSecure = true;

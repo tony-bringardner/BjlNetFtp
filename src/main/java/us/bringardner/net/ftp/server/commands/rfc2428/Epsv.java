@@ -42,7 +42,7 @@ import us.bringardner.net.ftp.server.commands.BaseCommand;
  * @author Tony Bringardner
  *
  */
-public class Epsv extends BaseCommand implements FtpCommand {
+public class Epsv extends BaseCommand {
 
     private static final long serialVersionUID = 1L;
 

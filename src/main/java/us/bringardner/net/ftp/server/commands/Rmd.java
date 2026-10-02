@@ -41,7 +41,7 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  *
  */
-public class Rmd extends BaseCommand  implements FtpCommand {
+public class Rmd extends BaseCommand {
 
 	private static final long serialVersionUID = 1L;
 

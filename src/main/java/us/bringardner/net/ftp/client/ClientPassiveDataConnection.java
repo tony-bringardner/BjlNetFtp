@@ -37,13 +37,14 @@ import java.io.IOException;
  * @author Tony Bringardner
  *
  */
-public class ClientPassiveDataConnection extends ClientDataTransferProcess {
+public final class ClientPassiveDataConnection extends ClientDataTransferProcess {
 
     private static final java.util.regex.Pattern EPSV_REPLY =
             java.util.regex.Pattern.compile("\\((.)\\1\\1(\\d+)\\1\\)");
 
     public ClientPassiveDataConnection(FtpClient client) throws IOException {    	
-        setClient(client);
+        super(client);
+        getLogger().setLevel(client.getLogger().getLevel());
         setPassive(true);
 
         /*
@@ -68,7 +69,7 @@ public class ClientPassiveDataConnection extends ClientDataTransferProcess {
             }
         }
 
-        ClientFtpResponse res = getClient().executeCommand(PASV);
+        ClientFtpResponse res = client.executeCommand(PASV);
         if( !res.isPositiveComplet()) {
             throw new IOException("Invalid response from "+PASV+" command = "+res._getResponseCode());
         }

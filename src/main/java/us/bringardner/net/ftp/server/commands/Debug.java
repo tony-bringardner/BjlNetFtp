@@ -34,7 +34,6 @@ import java.io.IOException;
 
 import us.bringardner.net.framework.server.IPermission;
 import us.bringardner.net.framework.server.IRequestContext;
-import us.bringardner.net.ftp.server.FtpCommand;
 import us.bringardner.net.ftp.server.FtpRequestProcessor;
 
 
@@ -42,7 +41,7 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  *
  */
-public class Debug extends BaseCommand implements FtpCommand {
+public class Debug extends BaseCommand {
 
 	private static final long serialVersionUID = 1L;
 
@@ -61,9 +60,9 @@ public class Debug extends BaseCommand implements FtpCommand {
 		boolean all = false;
 		if(context.hasNext()) {
 			String val = context.getNextToken();
-			if(val.toLowerCase().equals("all")) {
+			if(val.toLowerCase(java.util.Locale.ROOT).equals("all")) {
 				all = true;
-			} else if(val.toLowerCase().equals("none")) {
+			} else if(val.toLowerCase(java.util.Locale.ROOT).equals("none")) {
 				all = false;
 			}
 		}

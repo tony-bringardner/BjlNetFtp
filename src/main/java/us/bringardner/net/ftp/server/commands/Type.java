@@ -39,7 +39,7 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  *
  */
-public class Type extends NoAuthReqBaseCommand  implements FtpCommand {
+public class Type extends NoAuthReqBaseCommand {
 
 	private static final long serialVersionUID = 1L;
 
@@ -93,7 +93,7 @@ public class Type extends NoAuthReqBaseCommand  implements FtpCommand {
 		}
 		
 		boolean ok = false;
-		switch(args[1].toLowerCase().charAt(0)){
+		switch(args[1].toLowerCase(java.util.Locale.ROOT).charAt(0)){
 			case 'i': processor.setRepresentationType(FtpRequestProcessor.TYPE_IMAGE);
 					ok = true;
 					break;

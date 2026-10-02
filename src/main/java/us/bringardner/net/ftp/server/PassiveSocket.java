@@ -134,6 +134,7 @@ public  class PassiveSocket {
 			try {
 				dataSocket.close();
 			} catch(Exception ex) {
+				processor.logDebug("Error closing passive data socket", ex);
 			}
 			dataSocket = null;
 		}

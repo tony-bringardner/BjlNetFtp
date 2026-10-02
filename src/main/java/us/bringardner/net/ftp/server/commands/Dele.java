@@ -43,7 +43,7 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  *
  */
-public class Dele extends BaseCommand implements FtpCommand {
+public class Dele extends BaseCommand {
 
 	private static final long serialVersionUID = 1L;
 

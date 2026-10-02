@@ -161,7 +161,7 @@ http://www.ietf.org/internet-drafts/draft-ietf-ftpext-mlst-16.txt
 			processor.setTempValue(REST,marker);
 			processor.reply(REPLY_350_FILE_ACTION_PENDING,"Restarting at "+marker+". Send STORE or RETRIEVE"); 
 					
-		} catch(Exception ex){	
+		} catch(NumberFormatException ex){	
 			processor.reply(REPLY_500_SYNTAX_ERROR, "Marker "+commandLine+" could not be converted to a number ex="+ex);
 		}
 		

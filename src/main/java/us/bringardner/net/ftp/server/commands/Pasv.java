@@ -41,7 +41,7 @@ import us.bringardner.net.ftp.server.PassiveSocket;
  * @author Tony Bringardner
  *
  */
-public class Pasv extends BaseCommand implements FtpCommand {
+public class Pasv extends BaseCommand {
 
     private static final long serialVersionUID = 1L;
 

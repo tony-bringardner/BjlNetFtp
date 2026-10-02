@@ -91,7 +91,7 @@
 				<version>${spotbugs.version}</version>
 				<configuration>
 					<effort>Max</effort>
-					<threshold>Medium</threshold>
+					<threshold>Low</threshold>
 					<excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
 				</configuration>
 				<executions>

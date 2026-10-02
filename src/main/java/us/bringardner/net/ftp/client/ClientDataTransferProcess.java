@@ -67,9 +67,18 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 		}
 	}
 
+	/** @param client the client this data connection belongs to */
+	protected ClientDataTransferProcess(FtpClient client) {
+		this.client = java.util.Objects.requireNonNull(client, "client");
+	}
+
 	public void stop() {
 		running = false;
-		thread.interrupt();
+		Thread t = thread;
+		// never started
+		if( t != null ) {
+			t.interrupt();
+		}
 	}
 
 	public FtpClient getClient() {
@@ -383,18 +392,24 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 				try {
 					output.flush();
 					output.close();
-				} catch(Exception ex) {}
+				} catch(Exception ex) {
+					logDebug("Error closing data output", ex);
+				}
 			}
 
 			if( input != null ) {
 				try {
 					input.close();
-				} catch(Exception ex) {}
+				} catch(Exception ex) {
+					logDebug("Error closing data input", ex);
+				}
 			}
 
 			try {
 				socket.close();
-			} catch(Exception ex) {}
+			} catch(Exception ex) {
+				logDebug("Error closing data socket", ex);
+			}
 		}
 
 	}    

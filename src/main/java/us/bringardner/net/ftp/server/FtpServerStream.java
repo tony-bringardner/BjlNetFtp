@@ -290,7 +290,7 @@ public class FtpServerStream extends BaseThread {
 				try {
 					processor.setLinger(socket);
 				} catch (Exception e) {
-					// ignore
+					processor.logDebug("Can't set linger", e);
 				}
 			}
 			// Close the local side first and check for errors (e.g. disk full on close)
@@ -366,7 +366,7 @@ public class FtpServerStream extends BaseThread {
 			try {
 				c.close();
 			} catch (Exception e) {
-				// ignore
+				// cleanup after the transfer's result was decided (see spotbugs-exclude.xml)
 			}
 		}
 	}

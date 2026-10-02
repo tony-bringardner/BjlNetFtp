@@ -135,7 +135,7 @@ public class FtpServer extends Server {
 	//private boolean useJdbc = false;
 	private FileSourceFactory factory = FileSourceFactory.getDefaultFactory();
 	
-	private class ServerConnection extends Connection {
+	private final class ServerConnection extends Connection {
 
 		public ServerConnection( Socket socket, boolean useCRLF,Level logLevel) throws IOException {
 			super(socket,useCRLF); 
@@ -232,7 +232,7 @@ public class FtpServer extends Server {
 			port = Integer.parseInt(tmp);
 		}
 		
-		boolean sucure = System.getProperty(FTP_NAME+".secure", "false").toLowerCase().equals("true");
+		boolean sucure = System.getProperty(FTP_NAME+".secure", "false").toLowerCase(java.util.Locale.ROOT).equals("true");
 		FtpServer server = new FtpServer(port, FTP_NAME,sucure);		
 		server.start();
 		System.out.println("FtpServer started on port "+port);
@@ -261,7 +261,7 @@ public class FtpServer extends Server {
 		//  Determine which FileSource to use
 		String tmp = System.getProperty(FILE_SOURCE_PROP);
 		if( tmp != null ) {
-			tmp = tmp.toLowerCase();
+			tmp = tmp.toLowerCase(java.util.Locale.ROOT);
 			setFileSourceFactory(FileSourceFactory.getFileSourceFactory(tmp));
 		} else {
 			setFileSourceFactory(FileSourceFactory.getDefaultFactory());
@@ -271,7 +271,7 @@ public class FtpServer extends Server {
 		tmp = System.getProperty(ROOT_PROP);
 		if( tmp == null ) {
 
-			if(System.getProperty("os.name").toLowerCase().indexOf("win") >= 0) {
+			if(System.getProperty("os.name").toLowerCase(java.util.Locale.ROOT).indexOf("win") >= 0) {
 				tmp = DEFAULT_ROOT_WINDOWS;
 			} else {
 				tmp = DEFAULT_ROOT;
@@ -314,44 +314,56 @@ public class FtpServer extends Server {
 		IAccessControlList acl = getAccessControl();
 		if( acl == null ) {
 			//  I'll honor the RFC 959 for ANONYMOUS and FTP users
-			setAccessControl(new IAccessControlList() {
-				
-				IPrincipal anonymous = new AbstractPrincipal("anonymous") {
-
-					@Override
-					public boolean authenticate(byte[] credentials) {
-						return true;
-					}					
-				} ;
-
-				@Override
-				public void initialize(IServer server) throws IOException {
-					anonymous.setParameter(FtpRequestProcessor.PARAMETER_ROOT, "/anonymous");
-				}
-				
-				@Override
-				public IPrincipal getPrincipal(String user) {
-					if( !(user.equalsIgnoreCase("anonymous") || user.equalsIgnoreCase("ftp"))) {
-						return null;
-					}
-					
-					return anonymous;						
-					
-				}
-				
-				@Override
-				public boolean checkPermission(IPrincipal user, IPermission action) {
-					// give anonymous all but admin rights
-					boolean ret = user.getName().equals("anonymous") && !FtpCommand.ADMIN_PERMISSION.equals(action);
-					
-					return ret;
-				}
-			});
+			setAccessControl(new AnonymousAcl());
 		}
 		
 	}
 	
 	
+	/**
+	 * Access control used when none is configured: RFC 959 anonymous access ("anonymous" or
+	 * "ftp", any password) with every permission except the administrator's.
+	 */
+	private static final class AnonymousAcl implements IAccessControlList {
+		
+		/** The anonymous user: any password is accepted (RFC 959 / RFC 1635). */
+		private static final class AnonymousPrincipal extends AbstractPrincipal {
+			AnonymousPrincipal() {
+				super("anonymous");
+			}
+
+			@Override
+			public boolean authenticate(byte[] credentials) {
+				return true;
+			}
+		}
+
+		private final IPrincipal anonymous = new AnonymousPrincipal();
+
+		@Override
+		public void initialize(IServer server) throws IOException {
+			anonymous.setParameter(FtpRequestProcessor.PARAMETER_ROOT, "/anonymous");
+		}
+		
+		@Override
+		public IPrincipal getPrincipal(String user) {
+			if( !(user.equalsIgnoreCase("anonymous") || user.equalsIgnoreCase("ftp"))) {
+				return null;
+			}
+			
+			return anonymous;						
+			
+		}
+		
+		@Override
+		public boolean checkPermission(IPrincipal user, IPermission action) {
+			// give anonymous all but admin rights
+			boolean ret = user.getName().equals("anonymous") && !FtpCommand.ADMIN_PERMISSION.equals(action);
+			
+			return ret;
+		}
+	}
+
 	public FileSource getFtpRoot() throws IOException {
 		if( ftpRoot == null ) {
 			// e.g. the configured root could not be created
