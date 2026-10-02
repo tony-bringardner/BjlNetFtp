@@ -256,19 +256,57 @@ public class FtpClientFile extends BaseObject {
 
 	}
 
+	/**
+	 * Split an MLSx entry into its facts and pathname (RFC 3659 section 7.2): the facts each
+	 * end with ';', then one space, then the pathname, which may itself contain spaces or ';'.
+	 * Servers used to be read as if the entry ended with a bare name; RFC 3659 servers (and
+	 * this project's server since BJL-48) send the whole pathname for MLST.
+	 * @param entry an MLST or MLSD line (a leading space is allowed)
+	 * @return { facts, pathname }, or null if the line isn't an MLSx entry
+	 */
+	public static String[] splitMlsxEntry(String entry) {
+		if( entry == null ) {
+			return null;
+		}
+		int start = 0;
+		while( start < entry.length() && entry.charAt(start) == ' ' ) {
+			start++;
+		}
+		// The facts end at the first "; ": a fact value can't contain ';' but may contain a
+		// space (a Windows owner such as "NT AUTHORITY\SYSTEM")
+		int end = entry.indexOf("; ", start);
+		if( end < 0 ) {
+			return null;
+		}
+		return new String[] { entry.substring(start, end+1), entry.substring(end+2) };
+	}
+
+	/**
+	 * @param pathname the pathname from an MLSx entry: a name (MLSD) or a whole path (MLST)
+	 * @return the last part of it, the file's name
+	 */
+	public static String mlsxName(String pathname) {
+		String p = pathname;
+		while( p.length() > 1 && p.endsWith("/") ) {
+			p = p.substring(0, p.length()-1);
+		}
+		int idx = p.lastIndexOf('/');
+		return idx >= 0 ? p.substring(idx+1) : p;
+	}
+
 	private void parseMlstEntry(String entry) {
-		String [] parts = entry.split(";");
-		if( parts.length < 4 ) {
+		// RFC 3659 section 7.2: facts (each ending with ';'), one space, then the pathname.
+		// MLST gives the whole pathname (/dir/a.txt), MLSD usually just the name (BJL-49).
+		String [] split = splitMlsxEntry(entry);
+		String [] parts = split == null ? new String[0] : split[0].split(";");
+		if( parts.length < 3 ) {
 			//  Can't be a valid MLST entry
 			parseUnixEntry(entry);
 			return;
 		}
-		name = parts[parts.length-1].trim();
-		if( name.length()>0 && name.charAt(0)=='/') {
-			name = name.substring(1);
-		}
+		name = mlsxName(split[1]);
 
-		for (int idx = 0,sz=parts.length-1; idx < sz; idx++) {
+		for (int idx = 0,sz=parts.length; idx < sz; idx++) {
 			String [] tmp = parts[idx].split("=");
 			String fact = tmp[0].trim().toUpperCase();
 			if( fact.equals(FTP.MODIFY)) {
