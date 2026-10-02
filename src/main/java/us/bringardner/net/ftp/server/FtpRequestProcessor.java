@@ -51,7 +51,6 @@ import javax.net.SocketFactory;
 import javax.net.ssl.SSLSocket;
 
 import us.bringardner.core.ILogger;
-import us.bringardner.core.util.ThreadSafeDateFormat;
 import us.bringardner.io.filesource.FileSource;
 import us.bringardner.io.filesource.FileSourceFactory;
 import us.bringardner.net.framework.server.AbstractCommandProcessor;
@@ -72,7 +71,6 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	public static final String UNRECOGNIZED_COMMAND="UNRECOGNIZED_COMMAND";
 	public static final String NOT_AUTHORIZED_COMMAND="NOT_AUTH_COMMAND";
 
-	public static final ThreadSafeDateFormat formatter = new ThreadSafeDateFormat ("yyyy-MM-dd hh:mm:ss ");
 
 	public static final String PARAMETER_ROOT = "userRoot";
 	public static final String PARAMETER_DEFAULT_DIRECTORY = "defaultDir";

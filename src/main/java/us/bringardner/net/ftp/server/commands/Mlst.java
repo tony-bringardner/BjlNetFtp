@@ -30,12 +30,17 @@
 package us.bringardner.net.ftp.server.commands;
 
 import java.io.IOException;
-import java.util.Date;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.TreeMap;
 
-import us.bringardner.core.util.ThreadSafeDateFormat;
 import us.bringardner.io.filesource.FileSource;
 import us.bringardner.net.framework.server.IPermission;
 import us.bringardner.net.framework.server.IRequestContext;
@@ -70,7 +75,28 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
    time standards is not considered important.
 
 	 */
-	public static final ThreadSafeDateFormat TIME_FORMAT = new ThreadSafeDateFormat("yyyyMMddHHmmss.SSS");
+	/**
+	 * MLSx modify= and MDTM times as this server writes them: YYYYMMDDHHMMSS.sss (BJL-36).
+	 * DateTimeFormatter is immutable, so sessions don't wait on a shared lock as they did with
+	 * the synchronized SimpleDateFormat. Use {@link #formatTime(long)} and {@link #parseTime(String)}.
+	 */
+	public static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("uuuuMMddHHmmss.SSS");
+
+	/** RFC 3659 time-val for parsing: 14 digits, then optionally "." and one or more digits */
+	private static final DateTimeFormatter TIME_PARSE = new DateTimeFormatterBuilder()
+			.appendPattern("uuuuMMddHHmmss")
+			.optionalStart()
+			.appendFraction(ChronoField.NANO_OF_SECOND, 1, 9, true)
+			.optionalEnd()
+			.toFormatter();
+
+	/**
+	 * The time zone MLSx and MDTM times are written and read in. Still the JVM's default zone;
+	 * RFC 3659 says UTC, which is BJL-37 (change it here, in one place).
+	 */
+	public static ZoneId timeZone() {
+		return ZoneId.systemDefault();
+	}
 
 	/*
 	 * 
@@ -364,7 +390,7 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 					val=("file");
 				}
 				break;
-			case FACT_MODIFY: val=(TIME_FORMAT.format(new Date(file.lastModified()))); 
+			case FACT_MODIFY: val=formatTime(file.lastModified()); 
 			break;
 			default : throw new IllegalArgumentException("Invaid fact = "+factType+" for file "+file);
 			}
@@ -387,9 +413,24 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 
 	}
 
+	/**
+	 * @param time milliseconds since the epoch
+	 * @return the time as MLSx modify= and MDTM show it, e.g. 20261001203612.345
+	 */
 	public static String formatTime(long time) {
-		String ret = TIME_FORMAT.format(new Date(time));
-		return ret;
+		return TIME_FORMAT.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(time), timeZone()));
+	}
+
+	/**
+	 * Parse an MLSx modify= / MDTM time (RFC 3659 time-val: YYYYMMDDHHMMSS with optional
+	 * fraction of a second, any number of digits).
+	 * @param value the time, e.g. 20261001203612 or 20261001203612.345
+	 * @return milliseconds since the epoch
+	 * @throws DateTimeException if the value isn't a valid time-val
+	 */
+	public static long parseTime(String value) throws DateTimeException {
+		LocalDateTime t = LocalDateTime.parse(value.trim(), TIME_PARSE);
+		return t.atZone(timeZone()).toInstant().toEpochMilli();
 	}
 
 	/* 
