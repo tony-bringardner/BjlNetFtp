@@ -294,7 +294,7 @@ public class TestSecurity {
 			control.setSoTimeout(5000);
 			java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(control.getInputStream(), StandardCharsets.UTF_8));
 			java.io.Writer out = new java.io.OutputStreamWriter(control.getOutputStream(), StandardCharsets.UTF_8);
-			assertTrue(in.readLine().startsWith("200"));
+			assertTrue(in.readLine().startsWith("220")); // greeting (RFC 959)
 			out.write("USER nobody\r\n");
 			out.flush();
 			assertTrue(in.readLine().startsWith("331"));

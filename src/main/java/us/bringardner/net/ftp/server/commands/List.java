@@ -43,7 +43,6 @@ import java.util.Locale;
 
 import us.bringardner.io.filesource.FileSource;
 
-import us.bringardner.io.CRLFLineWriter;
 import us.bringardner.net.framework.server.IPermission;
 import us.bringardner.net.framework.server.IRequestContext;
 import us.bringardner.net.ftp.server.FtpCommand;
@@ -194,21 +193,12 @@ public class List  extends BaseCommand  implements FtpCommand {
 		}
 		
 		
-	Socket sock = processor.getDataSocket();
-	
-	if( sock == null ) {
-		processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't get a data socket");
-	} else {
-		CRLFLineWriter list_out = new CRLFLineWriter(sock.getOutputStream());
-		processor.reply(REPLY_150_FILE_STATUS_OK,"Opening ASCII mode data connection for file list");
-		for(int i = 0; i < list.length ; i ++) {
-			list_out.writeLine(formatFile(list[i]));						
+		Socket sock = processor.getDataSocket();
+		if( sock == null ) {
+			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't get a data socket");
+		} else {
+			sendListing(processor, sock, list, this::formatFile, "Opening ASCII mode data connection for file list", false);
 		}
-	
-		list_out.flush();
-		list_out.close();
-		processor.reply(REPLY_226_CLOSING_DATA_CON,"Transfer complete");
-	}
 	}
 	
 	/*

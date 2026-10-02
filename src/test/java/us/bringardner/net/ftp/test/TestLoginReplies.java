@@ -89,7 +89,7 @@ public class TestLoginReplies {
 			socket.setSoTimeout(5000);
 			in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
 			out = new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8);
-			assertEquals(200, read());
+			assertEquals(220, read()); // greeting (RFC 959)
 		}
 
 		int send(String command) throws IOException {

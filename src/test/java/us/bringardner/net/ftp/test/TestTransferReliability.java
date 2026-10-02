@@ -505,7 +505,7 @@ public class TestTransferReliability {
 			control.setSoTimeout(10000);
 			in = new BufferedReader(new InputStreamReader(control.getInputStream(), StandardCharsets.UTF_8));
 			out = new OutputStreamWriter(control.getOutputStream(), StandardCharsets.UTF_8);
-			expect(200); // greeting
+			expect(220); // greeting (RFC 959)
 			send("USER anonymous");
 			expect(331);
 			send("PASS test@example.com");

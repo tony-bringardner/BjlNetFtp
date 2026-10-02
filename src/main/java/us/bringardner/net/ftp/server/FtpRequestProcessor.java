@@ -642,7 +642,8 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			 */   
 			setFactory(((FtpServer)getServer()).getFileSourceFactory());
 			setFtpRoot(((FtpServer)getServer()).getFtpRoot());
-			reply(us.bringardner.net.ftp.FTP.REPLY_200_OK,getServer().getName()+" Ready");
+			// RFC 959: the greeting is 220 "Service ready for new user" (was 200, which curl rejects)
+			reply(us.bringardner.net.ftp.FTP.REPLY_220_READY_NEW_USER,getServer().getName()+" Ready");
 			super.run();	
 
 		} catch (Throwable e) {

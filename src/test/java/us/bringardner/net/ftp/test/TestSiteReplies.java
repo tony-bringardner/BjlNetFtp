@@ -92,7 +92,7 @@ public class TestSiteReplies {
 			socket.setSoTimeout(5000);
 			in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
 			out = new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8);
-			assertEquals(200, code(read()));
+			assertEquals(220, code(read())); // greeting (RFC 959)
 			assertEquals(331, code(send("USER " + user)));
 			assertEquals(230, code(send("PASS " + password)));
 		}

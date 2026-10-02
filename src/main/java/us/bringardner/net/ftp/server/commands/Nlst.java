@@ -30,10 +30,6 @@
 package us.bringardner.net.ftp.server.commands;
 
 import java.io.IOException;
-import java.io.BufferedWriter;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
 import java.net.Socket;
 
 import us.bringardner.io.filesource.FileSource;
@@ -99,18 +95,7 @@ public class Nlst extends BaseCommand  implements FtpCommand {
 		if( sock == null ){
 			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data socket");
 		} else {
-			
-			// UTF-8 and CRLF line endings (println used the platform line separator)
-			Writer list_out = new BufferedWriter(new OutputStreamWriter(sock.getOutputStream(), StandardCharsets.UTF_8));				
-			processor.reply(REPLY_150_FILE_STATUS_OK,"Opening ASCII mode data connection for file list");
-			for(int i = 0; i < list.length ; i ++)	{
-				list_out.write(list[i].getName());
-				list_out.write("\r\n");
-			}
-			list_out.flush();
-			list_out.close();
-			sock.close();
-			processor.reply(REPLY_226_CLOSING_DATA_CON,"Transfer complete");
+			sendListing(processor, sock, list, FileSource::getName, "Opening ASCII mode data connection for file list", false);
 		}
 
 	}

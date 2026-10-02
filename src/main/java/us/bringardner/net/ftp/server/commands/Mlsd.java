@@ -30,7 +30,6 @@
 package us.bringardner.net.ftp.server.commands;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.Socket;
 
 import us.bringardner.io.filesource.FileSource;
@@ -213,41 +212,9 @@ public class Mlsd  extends BaseCommand  implements FeatCommand {
 		if( sock == null ) {
 			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't get a data socket");
 		} else {
-			processor.reply(REPLY_150_FILE_STATUS_OK,"Opening Binary mode data connection for file list");
-
-			StringBuilder buf = new StringBuilder();
-			for(int i = 0; i < list.length ; i ++) {
-				buf.append(Mlst.formatFile(list[i],processor).trim());
-				buf.append('\r');
-				buf.append('\n');
-			}
 			// some clients will complain if the output is empty
-			if( buf.length() == 0) {
-				buf.append("\r\n");
-			}
-
-			Throwable error = null;
-			
-			try {
-				OutputStream out = sock.getOutputStream();			
-				out.write(buf.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-				out.flush();
-				out.close();
-			} catch (Exception e) {
-				error = e;
-			} finally {
-				try {
-					sock.close();
-				} catch (Exception e2) {
-				}	
-			}
-			if( error != null) {
-				processor.reply(REPLY_551_ACTION_ABORTED,"Transfer error="+error);
-			} else {
-				processor.reply(REPLY_226_CLOSING_DATA_CON,"Transfer complete");	
-			}
-			
-
+			sendListing(processor, sock, list, file -> Mlst.formatFile(file, processor).trim(),
+					"Opening Binary mode data connection for file list", true);
 		}
 	}
 

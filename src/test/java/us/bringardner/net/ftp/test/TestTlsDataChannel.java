@@ -253,7 +253,7 @@ public class TestTlsDataChannel {
 			Socket s = new Socket();
 			s.connect(new InetSocketAddress("127.0.0.1", port), 5000);
 			c.attach(s);
-			c.expect(200);
+			c.expect(220); // greeting (RFC 959)
 			c.login();
 			return c;
 		}
@@ -263,7 +263,7 @@ public class TestTlsDataChannel {
 			Socket s = new Socket();
 			s.connect(new InetSocketAddress("127.0.0.1", port), 5000);
 			c.attach(s);
-			c.expect(200);
+			c.expect(220); // greeting (RFC 959)
 			c.cmd("AUTH TLS", 234);
 			SSLSocket tls = (SSLSocket) trustAll.getSocketFactory().createSocket(s, "localhost", port, true);
 			tls.setUseClientMode(true);
@@ -280,7 +280,7 @@ public class TestTlsDataChannel {
 			tls.setUseClientMode(true);
 			tls.startHandshake();
 			c.attach(tls);
-			c.expect(200);
+			c.expect(220); // greeting (RFC 959)
 			c.login();
 			return c;
 		}

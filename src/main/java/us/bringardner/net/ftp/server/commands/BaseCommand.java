@@ -28,8 +28,13 @@
  *
  */
 package us.bringardner.net.ftp.server.commands;
+import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 
+import us.bringardner.io.filesource.FileSource;
 import us.bringardner.net.framework.server.ICommandProcessor;
 import us.bringardner.net.framework.server.IPermission;
 import us.bringardner.net.framework.server.IRequestContext;
@@ -45,6 +50,77 @@ public abstract class BaseCommand implements FtpCommand ,FTP {
 
 	private static final long serialVersionUID = 1L;
 	
+	/** Buffer for directory listings sent on the data connection (BJL-30) */
+	public static final int LISTING_BUFFER_SIZE = 64*1024;
+
+	/** Formats one directory entry as a line of a listing (without the line end). */
+	@FunctionalInterface
+	public interface EntryFormatter {
+		String format(FileSource file) throws IOException;
+	}
+
+	/**
+	 * Send a directory listing (LIST, NLST, MLSD) on the data connection and reply.
+	 * <p>
+	 * Lines are UTF-8 with CRLF and go through one 64 KB buffer that is flushed once at the
+	 * end, so a listing is a few large writes (and TLS records) instead of one write, system
+	 * call and TCP segment per file, and nothing builds the whole listing in memory (BJL-30).
+	 * <p>
+	 * Replies 150 before sending, then 226, or 426 if the data connection fails (the client
+	 * closed it, a network error): the control connection stays open (a failed data
+	 * connection used to end the whole session). An entry that can't be formatted (e.g. the
+	 * file was deleted while listing) is left out and logged, like ls.
+	 *
+	 * @param processor the session
+	 * @param sock the data connection (closed when done)
+	 * @param list the entries, null for none
+	 * @param formatter makes the line for one entry
+	 * @param openMessage text of the 150 reply
+	 * @param blankLineIfEmpty send one empty line when there are no entries (some clients
+	 * complain about an empty MLSD)
+	 * @throws IOException only if a reply can't be sent on the control connection
+	 */
+	public static void sendListing(FtpRequestProcessor processor, Socket sock, FileSource[] list,
+			EntryFormatter formatter, String openMessage, boolean blankLineIfEmpty) throws IOException {
+		processor.reply(REPLY_150_FILE_STATUS_OK, openMessage);
+		IOException dataError = null;
+		int sent = 0;
+		try (OutputStream out = new BufferedOutputStream(sock.getOutputStream(), LISTING_BUFFER_SIZE)) {
+			if( list != null ) {
+				for (FileSource file : list) {
+					String line;
+					try {
+						line = formatter.format(file);
+					} catch (IOException | RuntimeException e) {
+						processor.logError("Can't list "+file, e);
+						continue;
+					}
+					out.write(line.getBytes(StandardCharsets.UTF_8));
+					out.write(CRLF);
+					sent++;
+				}
+			}
+			if( sent == 0 && blankLineIfEmpty ) {
+				out.write(CRLF);
+			}
+		} catch (IOException e) {
+			dataError = e;
+		} finally {
+			try {
+				sock.close();
+			} catch (IOException e) {
+			}
+		}
+		if( dataError != null ) {
+			processor.logDebug("Listing aborted after "+sent+" entries", dataError);
+			processor.reply(REPLY_426_CON_CLOSED, "Data connection closed; transfer aborted.");
+		} else {
+			processor.reply(REPLY_226_CLOSING_DATA_CON, "Transfer complete");
+		}
+	}
+
+	private static final byte[] CRLF = { '\r', '\n' };
+
 	private String name ;
 	private String help = "No help availibl";
 	
