@@ -44,7 +44,11 @@ import javax.net.SocketFactory;
 import us.bringardner.core.BaseObject;
 import us.bringardner.net.ftp.FTP;
 
-public abstract class ClientDataTransferProcess extends BaseObject implements Runnable,FTP {
+/**
+ * A client data connection (PASV/EPSV or PORT/EPRT). Transfers run on the caller's thread;
+ * this class starts no threads (BJL-60 removed the unused start()/stop()/run()).
+ */
+public abstract class ClientDataTransferProcess extends BaseObject implements FTP {
 
 	private FtpClient client;
 	/** Guards connecting the data socket (a lock, not a monitor: it connects, BJL-58). */
@@ -53,34 +57,14 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 	private boolean passive = false;
 	private InputStream input;
 	private OutputStream output;
-	private Thread thread;
 	private String name;
 	private String host;
 	private int port;
-	private boolean running;
 
-
-	public void start() {
-		if(!running ) {
-			thread = new Thread(this);
-			thread.setName(getName()+":"+getPort());
-			thread.setDaemon(false);
-			thread.start();
-		}
-	}
 
 	/** @param client the client this data connection belongs to */
 	protected ClientDataTransferProcess(FtpClient client) {
 		this.client = java.util.Objects.requireNonNull(client, "client");
-	}
-
-	public void stop() {
-		running = false;
-		Thread t = thread;
-		// never started
-		if( t != null ) {
-			t.interrupt();
-		}
 	}
 
 	public FtpClient getClient() {

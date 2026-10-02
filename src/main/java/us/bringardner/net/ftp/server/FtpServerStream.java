@@ -36,8 +36,6 @@ import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -75,12 +73,6 @@ public class FtpServerStream extends BaseThread {
 		 */
 		void transferComplete(boolean success) throws IOException;
 	}
-
-	private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(r -> {
-		Thread t = new Thread(r, "FtpServerStream-watchdog");
-		t.setDaemon(true);
-		return t;
-	});
 
 	/**
 	 * Held while the transfer marks itself finished and sends its final reply, and by ABOR, so
@@ -179,12 +171,24 @@ public class FtpServerStream extends BaseThread {
 	}
 
 	/**
-	 * Abort the transfer (ABOR). Closing the socket unblocks any pending read or write.
+	 * Abort the transfer (ABOR): the client gets 426 then 226.
 	 */
 	public void abort() {
 		if( !finished && !aborted) {
 			aborted = true;
 			stop();
+		}
+	}
+
+	/**
+	 * Stop the transfer. Closing the data socket unblocks a pending read or write. The server
+	 * calls this when the session ends or the server stops (BJL-60); ABOR and the idle
+	 * watchdog use it too.
+	 */
+	@Override
+	public void stop() {
+		super.stop();
+		if( !finished ) {
 			closeQuietly(socket);
 		}
 	}
@@ -220,14 +224,22 @@ public class FtpServerStream extends BaseThread {
 			processor.logDebug("Can't set socket timeout", e);
 		}
 
+		// The idle watchdog runs on the server's scheduler (BJL-60; it used to be a static
+		// executor whose thread was never shut down)
 		long period = Math.max(100, Math.min(1000, timeout / 4));
-		ScheduledFuture<?> watchdog = WATCHDOG.scheduleAtFixedRate(() -> {
-			if( !stopping && System.currentTimeMillis() - lastProgress > timeout ) {
-				timedOut = true;
-				stop();
-				closeQuietly(socket);
-			}
-		}, period, period, TimeUnit.MILLISECONDS);
+		ScheduledFuture<?> watchdog = null;
+		try {
+			watchdog = processor.getServer().scheduleAtFixedRate(() -> {
+				if( !stopping && System.currentTimeMillis() - lastProgress > timeout ) {
+					timedOut = true;
+					stop();
+				}
+			}, period, period, TimeUnit.MILLISECONDS);
+		} catch (IllegalStateException | UnsupportedOperationException e) {
+			// The server is stopping (it stops this transfer too) or has no scheduler:
+			// the socket read timeout still ends a stalled read
+			processor.logDebug("No idle watchdog for this transfer", e);
+		}
 
 		try {
 			if( socket instanceof javax.net.ssl.SSLSocket ) {
@@ -279,7 +291,9 @@ public class FtpServerStream extends BaseThread {
 				processor.logError("Error in data transfer after "+bytesTransfered+" bytes", e);
 			}
 		} finally {
-			watchdog.cancel(false);
+			if( watchdog != null ) {
+				watchdog.cancel(false);
+			}
 		}
 
 		boolean success = done && error == null && !aborted && !timedOut;
@@ -346,7 +360,10 @@ public class FtpServerStream extends BaseThread {
 				 */
 				finished = true;
 				try {
-					if( aborted ) {
+					if( !isControlConnectionOpen() ) {
+						// The session has ended (that is why the transfer was stopped): no one to reply to
+						processor.logDebug("Session ended, transfer stopped after "+bytesTransfered+" bytes");
+					} else if( aborted ) {
 						/*
 						 * RFC 959: the server aborts the FTP service in progress and closes the data
 						 * connection, returning a 426 reply to indicate that the service request
@@ -378,6 +395,12 @@ public class FtpServerStream extends BaseThread {
 			finished = true;
 			running = false;
 		}
+	}
+
+	private boolean isControlConnectionOpen() {
+		us.bringardner.net.framework.IConnection con = processor.getConnection();
+		java.net.Socket control = con == null ? null : con.getSocket();
+		return control != null && !control.isClosed();
 	}
 
 	private static void closeQuietly(Closeable c) {

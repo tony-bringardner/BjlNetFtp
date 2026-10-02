@@ -102,20 +102,6 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		}
 
 		/**
-		 * Abort any running transfer without sending a reply (end of session).
-		 */
-		void abortQuietly() {
-			controlLock.lock();
-			try {
-				if( stream.isActive() ) {
-					stream.abort();
-				}
-			} finally {
-				controlLock.unlock();
-			}
-		}
-
-		/**
 		 * @return true if a data transfer has been started and has not sent its final reply.
 		 */
 		public boolean isTransferInProgress() {
@@ -146,7 +132,19 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 				}
 				reply(REPLY_150_FILE_STATUS_OK, message);
 				stream = next;
-				next.start();
+				try {
+					/*
+					 * The server runs and manages the transfer thread (BJL-60): the same kind
+					 * of thread as the session (VirtualThreads), stopped when the session ends
+					 * or the server stops.
+					 */
+					getServer().startTask(FtpRequestProcessor.this, next);
+				} catch (IllegalStateException e) {
+					// The session is ending or the server is stopping
+					next.discard();
+					reply(REPLY_426_CON_CLOSED, "Transfer not started: "+e.getMessage());
+					return false;
+				}
 				return true;
 			} finally {
 				controlLock.unlock();
@@ -836,14 +834,9 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		} finally {
 			/*
 			 * RFC 959: an unexpected close on the control connection has the effect of an ABOR.
-			 * Release any passive listener / data socket and stop a running transfer so no
-			 * ports, threads or files are left open after the session ends.
+			 * The server stops a running transfer when the session ends (BJL-60); release any
+			 * passive listener / data socket here so no ports or files are left open.
 			 */
-			try {
-				transferInProcess.abortQuietly();
-			} catch (Throwable e) {
-				logDebug("Error aborting transfer at end of session", e);
-			}
 			resetDataConnection();
 		}
 
@@ -925,8 +918,6 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	 */
 	public void transferStream(InputStream in, OutputStream out, Socket sock, boolean upload, FtpServerStream.CompletionHandler handler) throws IOException{
 		FtpServerStream s = new FtpServerStream(this, in, out, sock, upload, handler);
-		// The transfer runs on the same kind of thread as its session (VirtualThreads, BJL-52)
-		s.setVirtual(isVirtualThread());
 		transferInProcess.start(s);
 	}
 

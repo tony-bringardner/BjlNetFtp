@@ -76,19 +76,6 @@ public final class ClientPassiveDataConnection extends ClientDataTransferProcess
         setHostAndPort(res.getResponseText());
     }
     
-    /* (non-Javadoc)
-     * @see java.lang.Runnable#run()
-     */
-    public void run() {
-        //  Force a connect;
-        try {
-            getSocket();
-        } catch (Exception ex) {
-            logError("Passive connectin error connecting to "+getHost()+":"+getPort(),ex);
-       }
-        
-        stop();
-    }
     
     
 

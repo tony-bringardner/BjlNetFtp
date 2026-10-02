@@ -83,19 +83,6 @@ public final class ClientActiveDataConnection extends ClientDataTransferProcess 
         }
     }
     
-    /* (non-Javadoc)
-     * @see java.lang.Runnable#run()
-     */
-    public void run() {
-        //  Force a connect;
-        try {
-            getSocket();
-        } catch (Exception ex) {
-            logError("Active connection error connecting to "+getHost()+":"+getPort(),ex);
-       }
-        
-        stop();
-    }
     
     
 
