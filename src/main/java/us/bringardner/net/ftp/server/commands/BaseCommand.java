@@ -107,6 +107,9 @@ public abstract class BaseCommand implements FtpCommand ,FTP {
 			if( sent == 0 && blankLineIfEmpty ) {
 				out.write(CRLF);
 			}
+			out.flush();
+			// close_notify only, not user_canceled (GnuTLS clients, BJL-2)
+			FtpRequestProcessor.shutdownTlsOutput(sock);
 		} catch (IOException e) {
 			dataError = e;
 		} finally {

@@ -955,6 +955,23 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 	/**
+	 * Ends our side of a TLS data connection with just a close_notify (RFC 8446 section 6.1),
+	 * before the socket is closed. Java's close() of a TLS 1.3 socket sends a user_canceled
+	 * alert first, which GnuTLS clients (FileZilla, lftp) report as "A TLS fatal alert has
+	 * been received" on every listing and download (BJL-2). Does nothing for plain sockets.
+	 * @param socket a data connection
+	 */
+	public static void shutdownTlsOutput(Socket socket) {
+		if( socket instanceof javax.net.ssl.SSLSocket && !socket.isClosed() && !socket.isOutputShutdown() ) {
+			try {
+				socket.shutdownOutput();
+			} catch (IOException | UnsupportedOperationException e) {
+				// the close that follows ends the connection anyway
+			}
+		}
+	}
+
+	/**
 	 * InputStream.skip() may legitimately skip fewer bytes than requested,
 	 * so keep skipping until done or end of stream.
 	 * @return number of bytes actually skipped

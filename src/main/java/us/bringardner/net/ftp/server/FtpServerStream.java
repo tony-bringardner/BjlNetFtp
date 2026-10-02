@@ -306,6 +306,17 @@ public class FtpServerStream extends BaseThread {
 					processor.logError("Error closing local stream", e);
 				}
 			}
+			if( success ) {
+				// close_notify only, not user_canceled (GnuTLS clients, BJL-2)
+				if( !upload ) {
+					try {
+						output.flush();
+					} catch (IOException e) {
+						processor.logDebug("Flush before TLS shutdown failed", e);
+					}
+				}
+				FtpRequestProcessor.shutdownTlsOutput(socket);
+			}
 			closeQuietly(remote);
 			closeQuietly(socket);
 
