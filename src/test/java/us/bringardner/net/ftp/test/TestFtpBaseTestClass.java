@@ -404,6 +404,8 @@ public abstract class TestFtpBaseTestClass {
 		String parts[] = ls[0].trim().split("[;]");
 
 		SimpleDateFormat fmt = new SimpleDateFormat("yyyyMMddHHmmss.SSS");
+		// RFC 3659: MLSx times are UTC (BJL-37)
+		fmt.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
 
 
 		for(String part : parts) {
@@ -432,6 +434,12 @@ public abstract class TestFtpBaseTestClass {
 				}
 			}
 		}
+
+		// MDTM gives the same UTC time (RFC 3659 section 3, BJL-37)
+		ClientFtpResponse mdtm = client.executeCommand(FTP.MDTM, remoteFileName);
+		assertEquals(213, mdtm._getResponseCode(), "MDTM "+mdtm);
+		long mdtmDelta = Math.abs(now.getTime()-fmt.parse(mdtm.getResponseText().trim()).getTime());
+		assertTrue(mdtmDelta < 1000, "MDTM should be now (UTC): "+mdtm.getResponseText()+" delta="+mdtmDelta);
 
 		ls = client.executeList(true, remoteFileName);
 		assertEquals(1, ls.length,"Should only be one entry");

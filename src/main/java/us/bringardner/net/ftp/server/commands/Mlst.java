@@ -34,6 +34,7 @@ import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
@@ -91,11 +92,13 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 			.toFormatter();
 
 	/**
-	 * The time zone MLSx and MDTM times are written and read in. Still the JVM's default zone;
-	 * RFC 3659 says UTC, which is BJL-37 (change it here, in one place).
+	 * The time zone MLSx and MDTM times are written and read in: always UTC (RFC 3659
+	 * sections 2.3 and 3), whatever the server's or client's zone. They used to be in the
+	 * JVM's default zone, so clients saw times shifted by the server's UTC offset (BJL-37).
+	 * LIST dates are different: they stay in local time, like ls.
 	 */
 	public static ZoneId timeZone() {
-		return ZoneId.systemDefault();
+		return ZoneOffset.UTC;
 	}
 
 	/*

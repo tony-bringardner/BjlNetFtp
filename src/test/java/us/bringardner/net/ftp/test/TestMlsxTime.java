@@ -21,12 +21,30 @@ import us.bringardner.net.ftp.server.commands.Mlst;
 
 /**
  * MLSx modify= / MDTM times (BJL-36): written as YYYYMMDDHHMMSS.sss with an immutable
- * DateTimeFormatter, read back as any RFC 3659 time-val (fraction optional, any length).
+ * DateTimeFormatter, read back as any RFC 3659 time-val (fraction optional, any length),
+ * always in UTC (BJL-37).
  */
 public class TestMlsxTime {
 
 	private static long millis(int y, int mo, int d, int h, int mi, int s, int ms) {
 		return LocalDateTime.of(y, mo, d, h, mi, s, ms * 1_000_000).atZone(Mlst.timeZone()).toInstant().toEpochMilli();
+	}
+
+	@Test
+	public void timesAreUtcWhateverTheDefaultZone() {
+		java.util.TimeZone before = java.util.TimeZone.getDefault();
+		try {
+			java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("America/New_York"));
+			// 2026-10-01 20:36:12.345 in New York is 2026-10-02 00:36:12.345 UTC
+			long t = LocalDateTime.of(2026, 10, 1, 20, 36, 12, 345_000_000).atZone(java.time.ZoneId.of("America/New_York")).toInstant().toEpochMilli();
+			assertEquals("20261002003612.345", Mlst.formatTime(t));
+			assertEquals(t, Mlst.parseTime("20261002003612.345"));
+			java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Tokyo"));
+			assertEquals("20261002003612.345", Mlst.formatTime(t));
+			assertEquals(t, Mlst.parseTime("20261002003612.345"));
+		} finally {
+			java.util.TimeZone.setDefault(before);
+		}
 	}
 
 	@Test
