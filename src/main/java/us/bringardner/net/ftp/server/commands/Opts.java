@@ -30,10 +30,12 @@
 package us.bringardner.net.ftp.server.commands;
 
 import java.io.IOException;
-import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 
 import us.bringardner.net.framework.server.IRequestContext;
+import us.bringardner.net.ftp.server.FeatCommand;
 import us.bringardner.net.ftp.server.FtpRequestProcessor;
 
 /**
@@ -41,9 +43,12 @@ import us.bringardner.net.ftp.server.FtpRequestProcessor;
  * @author Tony Bringardner
  * 
  */
-public class Opts extends NoAuthReqBaseCommand {
+public class Opts extends NoAuthReqBaseCommand implements FeatCommand {
 
 	private static final long serialVersionUID = 1L;
+
+	/** RFC 2640 feature name, also the OPTS option that turns it on. */
+	public static final String UTF8 = "UTF8";
 
 	public Opts() {
 		super(OPTS);
@@ -247,43 +252,77 @@ Internet Draft        draft-ietf-ftpext-mlst-16.txt       September 2002
      * 
 	 */
 	public void execute(FtpRequestProcessor processor, IRequestContext context) throws IOException {
-		String commandLine = context.getCommandLine();
-		
-        String [] parts = commandLine.split(" ");
-        if( parts.length < 3) {
-        	processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM,"Expected at lease 2 parameters (OPTS MKLS LIST_OF_FACTS)");
-        	
-        } else {
-        	/*
-        	 * Set the wanted parameters.  
-        	 * If any are unsupported, it's an error.
-        	 */
-        	parts = parts[2].toUpperCase(java.util.Locale.ROOT).split(";");
-        	
-        	 Map<String, Integer> supported = Mlst.getSupportedFacts();
-        	
-        	Map<String, String> wanted = new HashMap<String, String>();
-        	StringBuffer tmp = new StringBuffer("MLST OPTS ");
-        	for (int idx = 0; idx < parts.length; idx++) {
-        		if( parts[idx].length()== 0 ) {
-        			//  caused by a trailing semi-colen (OPTS MLST op1;op2;)
-        			continue;
-        		}
-        		
-        		if(supported.containsKey(parts[idx])) {
-        			wanted.put(parts[idx], parts[idx]);
-        			if(idx > 0 ) {
-        				tmp.append(';');
-        			}
-        			tmp.append(parts[idx]);
-        		} else {
-        			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM, "Unsupported Fact "+parts[idx]);
-        			return;
-        		}
+		// RFC 2389: OPTS <command-name> [ SP <command-options> ]
+		String args = context.getCommandLine().trim();
+		int sp = args.indexOf(' ');
+		args = sp < 0 ? "" : args.substring(sp+1).trim();
+		if( args.isEmpty() ) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM, "OPTS needs a command name");
+			return;
+		}
+		sp = args.indexOf(' ');
+		String name = (sp < 0 ? args : args.substring(0, sp)).toUpperCase(Locale.ROOT);
+		String options = sp < 0 ? "" : args.substring(sp+1).trim();
+
+		if( UTF8.equals(name) ) {
+			utf8(processor, options);
+		} else if( MLST.equals(name) ) {
+			mlst(processor, options);
+		} else {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM, "OPTS not supported for "+name);
+		}
+	}
+
+	/**
+	 * OPTS UTF8 ON (the de facto companion of RFC 2640's UTF8 feature, sent by FileZilla and
+	 * others). Path names are always UTF-8 here, so ON is accepted and OFF is refused (BJL-50).
+	 */
+	private void utf8(FtpRequestProcessor processor, String options) throws IOException {
+		if( options.isEmpty() || options.equalsIgnoreCase("ON") ) {
+			processor.reply(REPLY_OK, "Always in UTF8 mode.");
+		} else if( options.equalsIgnoreCase("OFF") ) {
+			processor.reply(REPLY_504_NOT_IMP_FOR_PARAM, "UTF8 can't be turned off");
+		} else {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM, "Expected OPTS UTF8 ON");
+		}
+	}
+
+	/**
+	 * OPTS MLST (RFC 3659 section 7.9): fact names are case-insensitive, unsupported facts are
+	 * ignored, no fact list selects none, and a syntax error (a space in the list) leaves the
+	 * selection unchanged. The reply lists the facts now selected (BJL-50).
+	 */
+	private void mlst(FtpRequestProcessor processor, String options) throws IOException {
+		if( options.indexOf(' ') >= 0 ) {
+			processor.reply(REPLY_501_SYNTAXT_ERROR_IN_PARAM, "Invalid MLST options");
+			return;
+		}
+		Map<String, Integer> supported = Mlst.getSupportedFacts();
+		Map<String, Integer> wanted = new TreeMap<String, Integer>();
+		for(String requested : options.split(";")) {
+			for(Map.Entry<String, Integer> fact : supported.entrySet()) {
+				if( fact.getKey().equalsIgnoreCase(requested.trim()) ) {
+					wanted.put(fact.getKey(), fact.getValue());
+				}
 			}
-        	processor.setTempValue(Mlst.FEAT, wanted);
-        	processor.reply(REPLY_OK,tmp.toString());
-        }
+		}
+		StringBuilder reply = new StringBuilder("MLST OPTS");
+		if( !wanted.isEmpty() ) {
+			reply.append(' ');
+			for(String fact : wanted.keySet()) {
+				reply.append(fact).append(Mlst.SEPERATOR);
+			}
+		}
+		processor.setTempValue(Mlst.FACTS, java.util.Collections.unmodifiableMap(wanted));
+		processor.reply(REPLY_OK, reply.toString());
+	}
+
+	/**
+	 * RFC 2640 section 3.1: a server that uses UTF-8 path names lists UTF8 in its FEAT reply.
+	 */
+	@Override
+	public String getFeatResponse(FtpRequestProcessor processor) {
+		return UTF8;
 	}
 
 }

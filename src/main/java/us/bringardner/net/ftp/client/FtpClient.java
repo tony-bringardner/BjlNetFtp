@@ -1427,14 +1427,13 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 
 					if( tmp != null ) {
 						/*
-						 * Tell the server witch facts we want.  If any are
-						 * not supported then we need to use LIST instead.
+						 * Tell the server which facts we want. FtpClientFile reads Perm for
+						 * canRead/canWrite; a server that honours OPTS MLST (RFC 3659 7.9)
+						 * sends only the facts asked for (BJL-50).
 						 */
-						//  must support at least these permissions
-
 						ClientFtpResponse res = executeCommand(OPTS+" "+MLST
 								+" "
-								// use permissions from list +PERM+";"
+								+PERM+";"
 								+TYPE+";"
 								+MODIFY+";"
 								+SIZE+";"

@@ -214,7 +214,7 @@ public class Mlsd  extends BaseCommand  implements FeatCommand {
 		} else {
 			// some clients will complain if the output is empty
 			String cwdPath = Mlst.currentDirPath(processor);
-			sendListing(processor, sock, list, file -> Mlst.formatFile(file, processor, cwdPath).trim(),
+			sendListing(processor, sock, list, file -> Mlst.formatFile(file, processor, cwdPath),
 					"Opening Binary mode data connection for file list", true);
 		}
 	}

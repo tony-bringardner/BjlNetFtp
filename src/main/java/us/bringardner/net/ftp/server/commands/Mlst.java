@@ -215,7 +215,7 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 		 * server's real path (BJL-48).
 		 */
 		String path = processor.getVirtualPath(target);
-		String entry = formatFile(target, processor).trim();
+		String entry = formatFile(target, processor);
 		// formatFile ends with the bare name; MLST shows the whole pathname
 		entry = entry.substring(0, entry.length()-target.getName().length())+path;
 		// one flush for the three lines (BJL-35)
@@ -389,7 +389,9 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 
 		Map<String, Integer> factsWanted = getWantedFacts(processor);
 
-		StringBuffer ret = new StringBuffer(" ");
+		// RFC 3659 7.2: entry = [facts] SP pathname, so with no facts it is " name". No
+		// leading space here and no trim() by the callers: both broke that case (BJL-50).
+		StringBuilder ret = new StringBuilder();
 
 		for(Map.Entry<String, Integer> fact : factsWanted.entrySet()){
 			String key = fact.getKey();

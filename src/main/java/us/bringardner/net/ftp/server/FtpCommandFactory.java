@@ -105,7 +105,6 @@ public class FtpCommandFactory implements ICommandFactory {
 		addCommand(new List());
 		addCommand(new Nlst());
 		addCommand(new Noop());
-		addCommand(new Opts());
 		addCommand(new Pass());
 		addCommand(new Pasv());
 		addCommand(new Port());
@@ -136,6 +135,8 @@ public class FtpCommandFactory implements ICommandFactory {
 		feat.addSupportedCommand(new Mlst());
 		feat.addSupportedCommand(new Mlsd());
 		feat.addSupportedCommand(new Mdtm());
+		// RFC 2640 UTF8 (OPTS UTF8 ON), and OPTS MLST (BJL-50)
+		feat.addSupportedCommand(new Opts());
 		
 		
 		//  Security (RFC 2228)
