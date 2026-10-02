@@ -89,6 +89,28 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	public static final char SEPERATOR_CHAR = '/';
 	public static final String SEPERATOR = ""+SEPERATOR_CHAR;
 	private static final String [] SECURE_TYPES = {"TLS","SSL"};
+
+	/**
+	 * Servers (host:port) whose data connections can't resume a TLS 1.3 session, so this JVM
+	 * uses TLS 1.2 with them (BJL-28). vsftpd sends TLS 1.3 session tickets with a lifetime
+	 * longer than RFC 8446 allows; Java discards them, and vsftpd (require_ssl_reuse) then
+	 * refuses every data connection with "522 SSL connection failed: session reuse required".
+	 */
+	private static final java.util.Set<String> TLS12_SERVERS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	private static final String TLS12 = "TLSv1.2";
+	private volatile boolean tls12Fallback = true;
+
+	/**
+	 * Thrown inside a transfer when the server refused the data connection's TLS session and
+	 * the transfer can be retried over TLS 1.2.
+	 */
+	static final class Tls12Needed extends IOException {
+		private static final long serialVersionUID = 1L;
+
+		Tls12Needed(String message, Throwable cause) {
+			super(message, cause);
+		}
+	}
 	private SocketFactory socketFactory;
 	private ServerSocketFactory serverSocketFactory = ServerSocketFactory.getDefault();
 
@@ -405,6 +427,154 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 */
 	public void setTransferBufferSize(int transferBufferSize) {
 		this.transferBufferSize = transferBufferSize;
+	}
+
+	/**
+	 * @return true (the default) to switch to TLS 1.2 with a server that refuses data
+	 * connections because they can't resume the TLS 1.3 session (BJL-28)
+	 */
+	public boolean isTls12Fallback() {
+		return tls12Fallback;
+	}
+
+	/**
+	 * When true (the default) and a server refuses a protected data connection because its
+	 * TLS 1.3 session wasn't resumed (vsftpd's require_ssl_reuse, see BJL-28), the client
+	 * reconnects with TLS 1.2, retries the transfer once, and uses TLS 1.2 with that server
+	 * (host and port) for the rest of the JVM's life. It never goes below TLS 1.2, and logs
+	 * when it happens. Set false to get the error instead.
+	 */
+	public void setTls12Fallback(boolean tls12Fallback) {
+		this.tls12Fallback = tls12Fallback;
+	}
+
+	/** @return true if this JVM uses TLS 1.2 with the server because of a fallback */
+	public static boolean isTls12Server(String host, int port) {
+		return TLS12_SERVERS.contains(serverKey(host, port));
+	}
+
+	/**
+	 * Use TLS 1.2 with this server from the next connection on, as if a fallback had happened
+	 * (for a server known to need it, e.g. vsftpd with require_ssl_reuse).
+	 */
+	public static void addTls12Server(String host, int port) {
+		TLS12_SERVERS.add(serverKey(host, port));
+	}
+
+	/** Forget the servers that needed a fallback (tests, or after the server is fixed). */
+	public static void clearTls12Servers() {
+		TLS12_SERVERS.clear();
+	}
+
+	private static String serverKey(String host, int port) {
+		return (host == null ? "" : host.toLowerCase(java.util.Locale.ROOT))+":"+port;
+	}
+
+	/** Before a new connection: TLS 1.2 for a server known to need it. */
+	private void applyTls12Fallback() {
+		if( tls12Fallback && isTls12Server(getHost(), getPort()) && !TLS12.equals(getProtocol()) ) {
+			logInfo("Using "+TLS12+" with "+getHost()+":"+getPort()+": its data connections can't resume TLS 1.3 sessions");
+			useTls12();
+		}
+	}
+
+	private void useTls12() {
+		setProtocol(TLS12);
+		// factories built from the old context
+		socketFactory = null;
+		serverSocketFactory = ServerSocketFactory.getDefault();
+	}
+
+	/** @return the control connection's TLS version, or null if it isn't encrypted */
+	String controlTlsProtocol() {
+		Socket s = sslSocket != null ? sslSocket : socket;
+		if( s instanceof SSLSocket ) {
+			return ((SSLSocket) s).getSession().getProtocol();
+		}
+		return null;
+	}
+
+	/**
+	 * Called after the 1xx reply to a transfer command: completes the data connection's TLS
+	 * handshake now, so a refused session is noticed before a stream is handed out and the
+	 * transfer can be retried (BJL-28).
+	 * @return null normally; the final (2xx) reply if the server already finished the transfer
+	 * without TLS (some servers, and this project's before BJL-28, close an empty transfer's
+	 * data connection without a handshake)
+	 */
+	ClientFtpResponse startDataTls(ClientDataTransferProcess dtp) throws IOException {
+		if( !isDataChannelSecure() ) {
+			return null;
+		}
+		Socket s = dtp.getSocket();
+		if( !(s instanceof SslEngineSocket) ) {
+			return null;
+		}
+		try {
+			((SslEngineSocket) s).startHandshake();
+			return null;
+		} catch (IOException e) {
+			dtp.close();
+			ClientFtpResponse res = null;
+			try {
+				res = readResponse();
+			} catch (IOException e2) {
+				abandonConnection();
+			}
+			if( res != null && res.isPositiveComplet() ) {
+				// an empty transfer
+				return res;
+			}
+			if( res != null && isTlsResumeRefusal(res) && tls12Fallback && "TLSv1.3".equals(controlTlsProtocol()) ) {
+				TLS12_SERVERS.add(serverKey(getHost(), getPort()));
+				throw new Tls12Needed("Server refused the TLS 1.3 data connection: "+res, e);
+			}
+			throw new IOException("TLS handshake on the data connection failed"+(res == null ? "" : ", server said: "+res), e);
+		}
+	}
+
+	/**
+	 * A transfer's final reply says the data connection's TLS session wasn't resumed, after
+	 * the handshake itself had succeeded (FileZilla Server checks then). Remember the server
+	 * for TLS 1.2 and drop the connection, so the next command reconnects with TLS 1.2.
+	 * @return true if it was such a refusal
+	 */
+	boolean noteTlsResumeRefusal(ClientFtpResponse res) {
+		if( res != null && isTlsResumeRefusal(res) && tls12Fallback && "TLSv1.3".equals(controlTlsProtocol()) ) {
+			TLS12_SERVERS.add(serverKey(getHost(), getPort()));
+			abandonConnection();
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * After a data connection carried nothing: if the reply is a TLS resumption refusal that
+	 * TLS 1.2 can fix, remember the server and throw Tls12Needed so the caller retries.
+	 */
+	void checkTlsResumeRefusal(ClientFtpResponse res) throws Tls12Needed {
+		if( res != null && isTlsResumeRefusal(res) && tls12Fallback && "TLSv1.3".equals(controlTlsProtocol()) ) {
+			TLS12_SERVERS.add(serverKey(getHost(), getPort()));
+			throw new Tls12Needed("Server refused the TLS 1.3 data connection: "+res, null);
+		}
+	}
+
+	/** 522 (RFC 4217: data connection protection refused), or 425/450/451 about TLS resumption */
+	static boolean isTlsResumeRefusal(ClientFtpResponse res) {
+		int code = res._getResponseCode();
+		String text = String.valueOf(res.getResponseText()).toLowerCase(java.util.Locale.ROOT);
+		boolean aboutResume = text.contains("resum") || text.contains("reuse");
+		return code == 522 || ((code == 425 || code == 450 || code == 451) && aboutResume);
+	}
+
+	/** Reconnect over TLS 1.2 (same user, same directory) after a Tls12Needed. */
+	private void fallBackToTls12(Tls12Needed e) throws IOException {
+		logInfo(e.getMessage()+"; reconnecting to "+getHost()+":"+getPort()+" with "+TLS12+" and retrying");
+		String dir = currentDir;
+		abandonConnection();
+		useTls12();
+		currentDir = dir;
+		reconnect();
 	}
 
 	/**
@@ -874,6 +1044,9 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 */
 	public synchronized boolean connect(String userId, String passwd, String account) throws IOException {
 		if( !connected ) {
+			if( socket == null ) {
+				applyTls12Fallback();
+			}
 			mlstTested = false;
 			this.userId = userId;
 			this.password = passwd;
@@ -1281,6 +1454,15 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	}
 
 	private String[] list(String dirPath, boolean useList) throws IOException {
+		try {
+			return listOnce(dirPath, useList);
+		} catch (Tls12Needed e) {
+			fallBackToTls12(e);
+			return listOnce(dirPath, useList);
+		}
+	}
+
+	private String[] listOnce(String dirPath, boolean useList) throws IOException {
 
 		/*
 		if(!setAsciiType()) {
@@ -1298,6 +1480,10 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 
 			if( res.isPositivePreliminay()) {
 				// Active mode accepts the server's connection here, after the 1xx reply
+				if( startDataTls(dtp) != null ) {
+					// empty listing, already complete
+					return new String[0];
+				}
 				in = new CRLFLineReader(dtp.getInput());
 				String line = null;
 				List<String> list = new ArrayList<String>();
@@ -1316,6 +1502,10 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 				ret = (String [])list.toArray(new String[list.size()]);
 				res = readResponse();
 				if( !res.isPositiveComplet()) {
+					if( list.isEmpty() ) {
+						// nothing came: a refused TLS 1.3 data connection is retried (BJL-28)
+						checkTlsResumeRefusal(res);
+					}
 					logError("Invalid response after list ="+res);
 				}
 			}
@@ -1364,7 +1554,13 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	 */
 	public synchronized InputStream getInputStream(String path, boolean ascii, long startingPos) throws IOException {
 		checkStreamInProcess(path);
-		ClientFtpInputStream ret = new ClientFtpInputStream(path,this,ascii, startingPos);
+		ClientFtpInputStream ret;
+		try {
+			ret = new ClientFtpInputStream(path,this,ascii, startingPos);
+		} catch (Tls12Needed e) {
+			fallBackToTls12(e);
+			ret = new ClientFtpInputStream(path,this,ascii, startingPos);
+		}
 		streamsInProcess.put(path, ret);
 
 		return ret;
@@ -1398,7 +1594,14 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	public synchronized OutputStream getOutputStream(String path, boolean ascii, boolean append) throws IOException {
 		checkStreamInProcess(path);
 
-		ClientFtpOutputStream ret = new ClientFtpOutputStream(path,this,ascii, append);
+		ClientFtpOutputStream ret;
+		try {
+			ret = new ClientFtpOutputStream(path,this,ascii, append);
+		} catch (Tls12Needed e) {
+			// nothing was written yet
+			fallBackToTls12(e);
+			ret = new ClientFtpOutputStream(path,this,ascii, append);
+		}
 		streamsInProcess.put(path, ret);
 
 		return ret;
@@ -1648,7 +1851,12 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		if( isSecure()) {
 			throw new IllegalStateException("Can not negotiate a secure channel from a secure channel.");
 		}
-		setProtocol(sslOrTsl);
+		/*
+		 * The AUTH mechanism (TLS, SSL) means "start TLS", not a TLS version: use the
+		 * configured protocol (default "TLS": the best both sides support). This used to
+		 * setProtocol(mechanism), which also threw away a setProtocol("TLSv1.2") made by the
+		 * caller (BJL-28).
+		 */
 		SSLContext ctx=getSSLContext();
 		SSLSocketFactory factory = ctx.getSocketFactory();
 

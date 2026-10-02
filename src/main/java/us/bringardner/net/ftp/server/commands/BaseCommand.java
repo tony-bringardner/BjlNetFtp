@@ -86,6 +86,10 @@ public abstract class BaseCommand implements FtpCommand ,FTP {
 		IOException dataError = null;
 		int sent = 0;
 		try (OutputStream out = new BufferedOutputStream(sock.getOutputStream(), LISTING_BUFFER_SIZE)) {
+			if( sock instanceof javax.net.ssl.SSLSocket ) {
+				// TLS even for an empty listing (RFC 4217, see FtpServerStream)
+				((javax.net.ssl.SSLSocket) sock).startHandshake();
+			}
 			if( list != null ) {
 				for (FileSource file : list) {
 					String line;

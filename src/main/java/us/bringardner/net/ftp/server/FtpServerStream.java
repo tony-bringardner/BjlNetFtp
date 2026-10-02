@@ -225,6 +225,15 @@ public class FtpServerStream extends BaseThread {
 		}, period, period, TimeUnit.MILLISECONDS);
 
 		try {
+			if( socket instanceof javax.net.ssl.SSLSocket ) {
+				/*
+				 * RFC 4217: a protected data connection is TLS even when nothing is sent. The
+				 * handshake used to happen on the first write, so an empty file closed the
+				 * connection with no TLS at all and the client saw a broken handshake.
+				 * Here, after the 150 reply, when the client starts its side (BJL-28).
+				 */
+				((javax.net.ssl.SSLSocket) socket).startHandshake();
+			}
 			while(!stopping && !done) {
 				int got;
 				try {

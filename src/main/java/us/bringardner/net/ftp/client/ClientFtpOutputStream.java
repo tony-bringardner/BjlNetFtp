@@ -76,7 +76,12 @@ public class ClientFtpOutputStream extends OutputStream implements FTP {
             dtp.close();
             throw new IOException ("Error invalid respones to "+cmd+" = "+res);
         }
-        // Active mode accepts the server's connection here, after the 1xx reply.
+        // Active mode accepts the server's connection here, after the 1xx reply. TLS is
+        // started now so a refused session can still be retried (BJL-28).
+        ClientFtpResponse finished = client.startDataTls(dtp);
+        if( finished != null ) {
+            throw new IOException(cmd+" "+path+": the server ended the transfer before any data was sent ("+finished+")");
+        }
         // Buffered: write(int) on a raw socket stream is one system call (and TCP packet) per byte
         out = new BufferedOutputStream(dtp.getOutput(), Math.max(8192, client.getTransferBufferSize()));
         
@@ -107,6 +112,9 @@ public class ClientFtpOutputStream extends OutputStream implements FTP {
         try {
         	ClientFtpResponse res = client.readResponse();
         	if( !res.isPositiveComplet()) {
+        		if( client.noteTlsResumeRefusal(res) ) {
+        			throw new IOException("Upload of "+path+" failed, server refused the TLS 1.3 data connection ("+res+"); retry, the next connection uses TLS 1.2");
+        		}
         		throw new IOException("Error completing transfer.  response = "+res);
         	}
         } catch(SocketTimeoutException ex) {

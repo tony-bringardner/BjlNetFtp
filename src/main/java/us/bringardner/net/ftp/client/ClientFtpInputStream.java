@@ -47,6 +47,8 @@ public class ClientFtpInputStream extends InputStream implements FTP {
     private ClientDataTransferProcess dtp ;
     private boolean ascii;
     private long startAt;
+    /** The final reply, when it was read before the stream was handed out */
+    private ClientFtpResponse earlyReply;
 
     public ClientFtpInputStream(String path, FtpClient client) throws IOException {
         this(path,client,false);
@@ -102,9 +104,36 @@ public class ClientFtpInputStream extends InputStream implements FTP {
             dtp.close();
             throw new IOException ("Error invalid respones to RETR = "+res._getResponseCode());
         }
-        // Active mode accepts the server's connection here, after the 1xx reply.
+        // Active mode accepts the server's connection here, after the 1xx reply. TLS is
+        // started now so a refused session can still be retried (BJL-28).
+        ClientFtpResponse finished = client.startDataTls(dtp);
+        if( finished != null ) {
+            // an empty file, already complete
+            earlyReply = finished;
+            eof = true;
+            in = new java.io.ByteArrayInputStream(new byte[0]);
+            return;
+        }
         // Buffered: read() on a raw socket stream is one system call per byte
         in = new BufferedInputStream(dtp.getInput(), Math.max(8192, client.getTransferBufferSize()));
+        if( client.isDataChannelSecure() ) {
+            /*
+             * A server that refuses the TLS session after the handshake (vsftpd with TLS 1.3)
+             * just closes the data connection and replies 522. Look at the first byte before
+             * handing the stream out, so such a refusal can still be retried (BJL-28).
+             */
+            in.mark(1);
+            if( in.read() < 0 ) {
+                // no data at all: an empty file, or a refused data connection
+                dtp.close();
+                ClientFtpResponse done = client.readResponse();
+                client.checkTlsResumeRefusal(done);
+                earlyReply = done;
+                eof = true;
+            } else {
+                in.reset();
+            }
+        }
         
         if( startAt > 0l && !canRestore) {
             //  Server could not do it so ignore the startAt data
@@ -124,6 +153,9 @@ public class ClientFtpInputStream extends InputStream implements FTP {
      * @return the final reply
      */
     private ClientFtpResponse completeDownload() throws IOException {
+        if( earlyReply != null ) {
+            return earlyReply;
+        }
         dtp.close();
         try {
             return client.readResponse();
@@ -188,6 +220,9 @@ public class ClientFtpInputStream extends InputStream implements FTP {
         try {
             ClientFtpResponse res = completeDownload();
             if( eof && !res.isPositiveComplet() ) {
+                if( client.noteTlsResumeRefusal(res) ) {
+                    throw new IOException("Download of "+path+" failed, server refused the TLS 1.3 data connection ("+res+"); retry, the next connection uses TLS 1.2");
+                }
                 throw new IOException("Download of "+path+" failed: "+res);
             }
         } finally {

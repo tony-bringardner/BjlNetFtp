@@ -150,6 +150,8 @@ public class TestTlsResumption {
 	@ParameterizedTest(name = "{0} {1}, active={2}")
 	@CsvSource({
 		"explicit, TLSv1.3, false", "explicit, TLSv1.3, true",
+		// setProtocol is honored with AUTH TLS too (it used to be replaced by "TLS", BJL-28)
+		"explicit, TLSv1.2, false", "explicit, TLSv1.2, true",
 		"implicit, TLSv1.2, false", "implicit, TLSv1.2, true",
 		"implicit, TLSv1.3, false" })
 	public void dataConnectionsResumeTheControlSession(String mode, String protocol, boolean active) throws Exception {
@@ -158,6 +160,7 @@ public class TestTlsResumption {
 		if (mode.equals("explicit")) {
 			client = new FtpClient("localhost", EXPLICIT_PORT);
 			client.setRequestSecure(true);
+			client.setProtocol(protocol);
 		} else {
 			client = new FtpClient("localhost", IMPLICIT_PORT);
 			client.setSecure(true);
@@ -183,6 +186,70 @@ public class TestTlsResumption {
 				assertArrayEquals(CONTENT, Files.readAllBytes(new File(root, name).toPath()));
 			}
 			assertEquals(1, trust.checks.get(), "full handshakes (1 = every data connection resumed): " + trust.protocols);
+		} finally {
+			client.close();
+		}
+	}
+
+	/** A server known to need TLS 1.2 (BJL-28) gets it on the next connection, and only that server. */
+	@org.junit.jupiter.api.Test
+	public void rememberedTls12ServerGetsTls12() throws Exception {
+		FtpClient.clearTls12Servers();
+		try {
+			FtpClient.addTls12Server("LOCALHOST", EXPLICIT_PORT);
+			assertTrue(FtpClient.isTls12Server("localhost", EXPLICIT_PORT));
+			CountingTrust trust = new CountingTrust();
+			FtpClient client = new FtpClient("localhost", EXPLICIT_PORT);
+			client.setRequestSecure(true);
+			client.setTrustManagers(new TrustManager[] { trust });
+			client.getLogger().setLevel(Level.ERROR);
+			try {
+				assertTrue(client.connect("anonymous", "x", null));
+				assertEquals("TLSv1.2", trust.protocols.get(0));
+				try (InputStream in = client.getInputStream("file.txt")) {
+					assertArrayEquals(CONTENT, in.readAllBytes());
+				}
+			} finally {
+				client.close();
+			}
+
+			// with the fallback off the remembered server is ignored
+			trust = new CountingTrust();
+			client = new FtpClient("localhost", EXPLICIT_PORT);
+			client.setRequestSecure(true);
+			client.setTls12Fallback(false);
+			client.setTrustManagers(new TrustManager[] { trust });
+			client.getLogger().setLevel(Level.ERROR);
+			try {
+				assertTrue(client.connect("anonymous", "x", null));
+				assertEquals("TLSv1.3", trust.protocols.get(0));
+			} finally {
+				client.close();
+			}
+		} finally {
+			FtpClient.clearTls12Servers();
+		}
+	}
+
+	/** An empty file over TLS: the first-byte check (BJL-28) must not lose the final reply. */
+	@org.junit.jupiter.api.Test
+	public void emptyDownloadOverTls() throws Exception {
+		Files.write(new File(root, "empty.txt").toPath(), new byte[0]);
+		FtpClient client = new FtpClient("localhost", EXPLICIT_PORT);
+		client.setRequestSecure(true);
+		client.setTrustManagers(new TrustManager[] { new CountingTrust() });
+		client.getLogger().setLevel(Level.ERROR);
+		try {
+			assertTrue(client.connect("anonymous", "x", null));
+			for (int i = 0; i < 2; i++) {
+				try (InputStream in = client.getInputStream("empty.txt")) {
+					assertEquals(-1, in.read());
+				}
+			}
+			// the conversation is still in step
+			try (InputStream in = client.getInputStream("file.txt")) {
+				assertArrayEquals(CONTENT, in.readAllBytes());
+			}
 		} finally {
 			client.close();
 		}
