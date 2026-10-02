@@ -124,6 +124,11 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private volatile Socket socket;
 	private volatile SSLSocket sslSocket;
 	public StringBuilder dialog = new StringBuilder();
+	/**
+	 * The representation type the server has accepted on this connection (A or I), or null
+	 * when unknown; TYPE is only sent when it changes (BJL-34).
+	 */
+	private volatile String currentType;
 	private volatile CRLFLineReader input;
 	private volatile CRLFLineWriter output;
 	private boolean connected = false;
@@ -820,6 +825,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 		output = null;
 		connected = false;
 		mlstTested = false;
+		currentType = null;
 		featResponse = null;
 		if( !isSecure() && channelSecure ) {
 			setSocketFactory(SocketFactory.getDefault());
@@ -871,6 +877,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 		output = null;
 		mlstTested = false;
 		connected = false;
+		currentType = null;
 		if( !isSecure() && channelSecure) {
 			//  reset these to defaults.
 			setSocketFactory(SocketFactory.getDefault());
@@ -1009,6 +1016,11 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * @throws IOException
 	 */
 	private ClientFtpResponse sendCommand(String command) throws  IOException {
+		String name = firstToken(command);
+		if( name.equals(TYPE) || name.equals("REIN") ) {
+			// set again by executeType when it succeeds; a raw TYPE or a REIN resets it
+			currentType = null;
+		}
 		writeLine(command);        
 		lastResponse = readResponse(); 
 		return lastResponse;
@@ -1048,6 +1060,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 				applyTls12Fallback();
 			}
 			mlstTested = false;
+			currentType = null;
 			this.userId = userId;
 			this.password = passwd;
 			this.account = account;
@@ -1164,10 +1177,19 @@ public class FtpClient extends SecureBaseObject implements FTP {
 		return executeType(TYPE_ASCII);
 	}
 
-	private boolean executeType(String type) throws IOException {
-
+	/**
+	 * Sends TYPE only when the type changes: it was sent before every transfer, an extra round
+	 * trip per file (BJL-34). The remembered type is forgotten when the connection is closed,
+	 * dropped or reopened, after REIN or a TYPE sent with executeCommand, and when TYPE fails.
+	 */
+	private synchronized boolean executeType(String type) throws IOException {
+		if( connected && type.equals(currentType) ) {
+			return true;
+		}
 		ClientFtpResponse res = executeCommand(TYPE,type);
 		boolean ret = res.isPositiveComplet();
+		// executeCommand may have reconnected; the type is set on the connection in use now
+		currentType = ret ? type : null;
 
 		return ret;
 	}

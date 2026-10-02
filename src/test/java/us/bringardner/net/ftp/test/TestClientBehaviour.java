@@ -92,6 +92,67 @@ public class TestClientBehaviour {
 		}
 	}
 
+	private static int count(String dialog, String text) {
+		int n = 0;
+		for (int i = dialog.indexOf(text); i >= 0; i = dialog.indexOf(text, i + 1)) {
+			n++;
+		}
+		return n;
+	}
+
+	/** TYPE is sent only when it changes (BJL-34); it used to be sent before every transfer. */
+	@Test
+	public void typeIsSentOnlyWhenItChanges() throws Exception {
+		FtpClient c = client();
+		try {
+			for (int i = 0; i < 3; i++) {
+				try (InputStream in = c.getInputStream("small.txt")) {
+					in.readAllBytes();
+				}
+			}
+			assertEquals(1, count(c.dialog.toString(), "Write:TYPE I"), c.dialog.toString());
+			try (InputStream in = c.getInputStream("small.txt", true)) {
+				in.readAllBytes();
+			}
+			try (InputStream in = c.getInputStream("small.txt", true)) {
+				in.readAllBytes();
+			}
+			assertEquals(1, count(c.dialog.toString(), "Write:TYPE A"));
+			try (InputStream in = c.getInputStream("small.txt")) {
+				in.readAllBytes();
+			}
+			assertEquals(2, count(c.dialog.toString(), "Write:TYPE I"));
+
+			// a TYPE sent by hand makes the client send its own again
+			c.executeCommand("TYPE A");
+			try (InputStream in = c.getInputStream("small.txt")) {
+				assertEquals("hello", new String(in.readAllBytes()));
+			}
+			assertEquals(3, count(c.dialog.toString(), "Write:TYPE I"));
+		} finally {
+			c.close();
+		}
+	}
+
+	/** After a reconnect the server is in its default type again, so TYPE is sent again. */
+	@Test
+	public void typeIsSentAgainAfterReconnect() throws Exception {
+		FtpClient c = client();
+		try {
+			try (InputStream in = c.getInputStream("small.txt")) {
+				in.readAllBytes();
+			}
+			c.close();
+			assertTrue(c.connect("anonymous", "x", null));
+			try (InputStream in = c.getInputStream("small.txt")) {
+				in.readAllBytes();
+			}
+			assertEquals(2, count(c.dialog.toString(), "Write:TYPE I"), c.dialog.toString());
+		} finally {
+			c.close();
+		}
+	}
+
 	@Test
 	public void closeTwiceIsHarmless() throws Exception {
 		FtpClient c = client();
