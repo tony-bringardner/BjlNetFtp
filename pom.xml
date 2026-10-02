@@ -153,6 +153,16 @@
 	</distributionManagement>
 
 	<dependencies>
+		<!--
+		  Declared here (BjlNetFtp uses it directly) so this version wins over the older
+		  bjl_core that bjl_file_system brings: bjl_net_framework 1.0.2 needs 1.2.0's
+		  BaseThread.setVirtual (BJL-51), else NoSuchMethodError when a session starts.
+		-->
+		<dependency>
+			<groupId>us.bringardner</groupId>
+			<artifactId>bjl_core</artifactId>
+			<version>1.2.0-SNAPSHOT</version>
+		</dependency>
 		<dependency>
 			<groupId>us.bringardner</groupId>
 			<artifactId>bjl_file_system</artifactId>
