@@ -33,7 +33,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.ParseException;
-import java.util.Calendar;
 import java.util.Date;
 
 import us.bringardner.core.BaseObject;
@@ -340,24 +339,11 @@ public class FtpClientFile extends BaseObject {
 
 		length = Long.parseLong(parts[sizePos]);
 
-		String tmp = parts[monthPos].trim()+" "+parts[dayPos].trim()+" "+parts[timePos].trim();
-		
-
 		try {
-			lastModified = List.oldDateFmt.parse(tmp).getTime();
-		} catch (Exception e) {
-			try {
-				lastModified = List.newDateFmt.parse(tmp).getTime();
-			} catch (Exception e2) {
-				Calendar cal = Calendar.getInstance();
-				tmp += " "+cal.get(Calendar.YEAR);
-				try {
-					lastModified = List.newDateFmt.parse(tmp).getTime();
-				} catch (Exception e3) {
-					logError("Can't parse date / time val ='"+tmp+"' entry="+entry);
-				}
-			}
-		}				
+			lastModified = List.parseListDate(parts[monthPos], parts[dayPos], parts[timePos], java.time.ZoneId.systemDefault(), System.currentTimeMillis());
+		} catch (java.time.DateTimeException e) {
+			logError("Can't parse date / time val ='"+parts[monthPos]+" "+parts[dayPos]+" "+parts[timePos]+"' entry="+entry);
+		}
 
 	}
 

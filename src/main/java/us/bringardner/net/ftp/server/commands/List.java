@@ -31,11 +31,18 @@ package us.bringardner.net.ftp.server.commands;
 
 import java.io.IOException;
 import java.net.Socket;
-import java.util.Date;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.Month;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.Locale;
 
 import us.bringardner.io.filesource.FileSource;
 
-import us.bringardner.core.util.ThreadSafeDateFormat;
 import us.bringardner.io.CRLFLineWriter;
 import us.bringardner.net.framework.server.IPermission;
 import us.bringardner.net.framework.server.IRequestContext;
@@ -51,30 +58,85 @@ public class List  extends BaseCommand  implements FtpCommand {
 	private static final long serialVersionUID = 1L;
 	// long arithmetic: the int version overflowed to about 17 days
 	public static final long ONE_YEAR = 365L*24*60*60*1000;
+	/** Half of an average Gregorian year, the "recent" limit ls uses (POSIX, GNU ls) */
+	public static final long SIX_MONTHS = 31556952000L/2;
 	/*
-	 * Month names in LIST output must be English regardless of the server's default
-	 * locale, or clients (including FtpClientFile) can't parse them.
+	 * LIST dates are written the way ls writes them (BJL-45): English month names whatever
+	 * the server's locale, and the day padded with a space, not a zero ("Oct  1"). Files
+	 * changed within the last six months show the time, older (and future) files the year,
+	 * so a client can always tell which year a time belongs to. DateTimeFormatter
+	 * is immutable, so sessions don't wait on each other (SimpleDateFormat needed a lock).
 	 */
-	public static final UsDateFormat newDateFmt = new UsDateFormat("MMM dd HH:mm");
-	public static final UsDateFormat oldDateFmt = new UsDateFormat("MMM dd yyyy");
+	/** "Oct  1 12:25": files changed within the last six months */
+	public static final DateTimeFormatter RECENT_FORMAT = DateTimeFormatter.ofPattern("MMM ppd HH:mm", Locale.US);
+	/** "Dec 14  2024": older or future files (the year is right aligned under the time) */
+	public static final DateTimeFormatter OLD_FORMAT = DateTimeFormatter.ofPattern("MMM ppd  yyyy", Locale.US);
+	private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("MMM", Locale.US);
 
-	/** A thread safe date format that always uses {@link java.util.Locale#US}. */
-	public static class UsDateFormat {
-		private final java.text.SimpleDateFormat format;
-
-		public UsDateFormat(String pattern) {
-			format = new java.text.SimpleDateFormat(pattern, java.util.Locale.US);
-		}
-
-		public synchronized String format(Date date) {
-			return format.format(date);
-		}
-
-		public synchronized Date parse(String value) throws java.text.ParseException {
-			return format.parse(value);
-		}
+	/**
+	 * @param time the file's last modified time
+	 * @param now the current time
+	 * @param zone the time zone to show the time in
+	 * @return the date as LIST shows it, e.g. "Oct  1 12:25" or "Dec 14  2024"
+	 */
+	public static String formatListDate(long time, long now, ZoneId zone) {
+		LocalDateTime t = LocalDateTime.ofInstant(Instant.ofEpochMilli(time), zone);
+		long age = now - time;
+		return (age >= 0 && age < SIX_MONTHS ? RECENT_FORMAT : OLD_FORMAT).format(t);
 	}
-    //public static final ThreadSafeDateFormat completeFmt = new ThreadSafeDateFormat("MMM dd yyyy HH:mm");
+
+	/**
+	 * Parse the date of an ls style LIST entry, the reverse of {@link #formatListDate}.
+	 * A recent entry ("Oct  1 12:25") has no year, so it gets the most recent year that
+	 * doesn't put it more than a day in the future (a day allows for time zones and clock
+	 * differences).
+	 * @param month English month abbreviation ("Oct")
+	 * @param day day of the month ("1" or "01")
+	 * @param timeOrYear "HH:mm" for recent entries, the year for older ones
+	 * @param zone the time zone the listing is in
+	 * @param now the current time
+	 * @return the time in milliseconds
+	 * @throws DateTimeException if the values aren't a valid date
+	 */
+	public static long parseListDate(String month, String day, String timeOrYear, ZoneId zone, long now) throws DateTimeException {
+		Month m = Month.from(MONTH.parse(capitalize(month.trim())));
+		int d;
+		try {
+			d = Integer.parseInt(day.trim());
+		} catch (NumberFormatException e) {
+			throw new DateTimeParseException("Invalid day", day, 0, e);
+		}
+		String ty = timeOrYear.trim();
+		if( ty.indexOf(':') < 0 ) {
+			int year;
+			try {
+				year = Integer.parseInt(ty);
+			} catch (NumberFormatException e) {
+				throw new DateTimeParseException("Invalid year", ty, 0, e);
+			}
+			return LocalDateTime.of(year, m, d, 0, 0).atZone(zone).toInstant().toEpochMilli();
+		}
+		LocalTime time = LocalTime.parse(ty.length() == 4 ? "0"+ty : ty);
+		long latest = now + 24L*60*60*1000;
+		int year = LocalDateTime.ofInstant(Instant.ofEpochMilli(now), zone).getYear() + 1;
+		DateTimeException last = null;
+		// Feb 29 may need to go back a few years
+		for (int tries = 0; tries < 9; tries++, year--) {
+			try {
+				long ret = LocalDateTime.of(year, m, d, time.getHour(), time.getMinute()).atZone(zone).toInstant().toEpochMilli();
+				if( ret <= latest ) {
+					return ret;
+				}
+			} catch (DateTimeException e) {
+				last = e;
+			}
+		}
+		throw last != null ? last : new DateTimeException("Invalid date "+month+" "+day+" "+timeOrYear);
+	}
+
+	private static String capitalize(String s) {
+		return s.isEmpty() ? s : s.substring(0, 1).toUpperCase(Locale.US)+s.substring(1).toLowerCase(Locale.US);
+	}
 	
 	/**
 	 * 
@@ -158,20 +220,8 @@ public class List  extends BaseCommand  implements FtpCommand {
 	public String formatFile(FileSource file) throws IOException{
 
 		String ret = "";
-		String dt = null;
+		String dt = formatListDate(file.lastModified(), System.currentTimeMillis(), ZoneId.systemDefault());
 
-		long tm = file.lastModified();
-        
-        
-		if( System.currentTimeMillis() - tm  < ONE_YEAR ) {
-			dt = newDateFmt.format(new Date(tm));
-		} else {
-			dt = oldDateFmt.format(new Date(tm));
-		}
-        
-		
-        //dt = completeFmt.format(new Date(tm));
-        
 		String perm = 
 				(file.canOwnerRead() ? "r":"-")
 				+(file.canOwnerWrite() ? "w":"-")
