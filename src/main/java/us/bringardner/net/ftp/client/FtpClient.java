@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.net.ServerSocketFactory;
 import javax.net.SocketFactory;
@@ -121,6 +122,13 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private String host;
 	private int port = FTP_PORT;
 	private boolean useSsl;
+	/**
+	 * One command at a time on the control connection, and the connection state that goes
+	 * with it. A lock, not synchronized methods: commands wait for the server's reply while
+	 * holding it, and on Java 21-23 a virtual thread blocked inside a monitor pins its carrier
+	 * thread, so many clients used from virtual threads stalled (BJL-58).
+	 */
+	private final ReentrantLock commandLock = new ReentrantLock();
 	private volatile Socket socket;
 	private volatile SSLSocket sslSocket;
 	private final StringBuilder dialog = new StringBuilder();
@@ -180,15 +188,15 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	/**
 	 * Manage concurrency <code>socketLock</code>
 	 */
-	private Object socketLock = new Object();
+	private final ReentrantLock socketLock = new ReentrantLock();
 	/**
 	 * Manage concurrency <code>inputLock</code>
 	 */
-	private Object inputLock = new Object();
+	private final ReentrantLock inputLock = new ReentrantLock();
 	/**
 	 * Manage concurrency <code>outputLock</code>
 	 */
-	private Object outputLock = new Object();
+	private final ReentrantLock outputLock = new ReentrantLock();
 
 	private volatile boolean mlstTested = false;
 	private volatile boolean mlstSupported = false;
@@ -676,10 +684,13 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 */
 	public CRLFLineReader getInput() throws UnknownHostException, IOException {
 		if( input == null ) {
-			synchronized (inputLock) {
+			inputLock.lock();
+			try {
 				if(input == null ) {
 					input = new CRLFLineReader(getSocket().getInputStream());
 				}
+			} finally {
+				inputLock.unlock();
 			}
 		}
 		return input;
@@ -694,10 +705,13 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 */
 	public CRLFLineWriter getOutput() throws IOException {
 		if( output == null ) {
-			synchronized (outputLock) {
+			outputLock.lock();
+			try {
 				if( output == null ) {
 					output = new CRLFLineWriter(getSocket().getOutputStream());
 				}
+			} finally {
+				outputLock.unlock();
 			}
 		}
 		return output;
@@ -725,7 +739,8 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 */
 	private Socket getSocket() throws IOException {
 		if( socket == null ) {
-			synchronized (socketLock) {
+			socketLock.lock();
+			try {
 				if( socket == null ) {
 					sslSocket = null;// just in case :-)
 					String host = getHost();
@@ -753,6 +768,8 @@ public class FtpClient extends SecureBaseObject implements FTP {
 					logDebug("Connected to "+host+":"+port+" timeout="+timeout+" linger = "+linger);
 					socket = tmp;
 				}				
+			} finally {
+				socketLock.unlock();
 			}
 		}
 
@@ -827,80 +844,90 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * Drop the control connection without sending QUIT. Used when the conversation with
 	 * the server is out of step (e.g. a reply timed out); the next command reconnects.
 	 */
-	synchronized void abandonConnection() {
-		Socket s = socket;
-		socket = null;
-		sslSocket = null;
-		input = null;
-		output = null;
-		connected = false;
-		mlstTested = false;
-		currentType = null;
-		featResponse = null;
-		if( !isSecure() && channelSecure ) {
-			setSocketFactory(SocketFactory.getDefault());
-			setServerSocketFactory(ServerSocketFactory.getDefault());
-		}
-		channelSecure = false;
-		dataChannelSecure = false;
-		if( s != null ) {
-			try {
-				s.close();
-			} catch (IOException e) {
+	void abandonConnection() {
+		commandLock.lock();
+		try {
+			Socket s = socket;
+			socket = null;
+			sslSocket = null;
+			input = null;
+			output = null;
+			connected = false;
+			mlstTested = false;
+			currentType = null;
+			featResponse = null;
+			if( !isSecure() && channelSecure ) {
+				setSocketFactory(SocketFactory.getDefault());
+				setServerSocketFactory(ServerSocketFactory.getDefault());
 			}
+			channelSecure = false;
+			dataChannelSecure = false;
+			if( s != null ) {
+				try {
+					s.close();
+				} catch (IOException e) {
+				}
+			}
+		} finally {
+			commandLock.unlock();
 		}
 	}
 
 	/**
 	 * Close the connect.  If connected a Quit command is send to the server.
 	 */
-	public synchronized  void close() {
-		if(connected ) {
-			try {
-				ClientFtpResponse res = sendCommand(QUIT);
-				if( !res.isPositiveComplet()) {
-					logDebug("Invalid resp from quit ="+res);
-				}
-			} catch(Exception ex) {}
-		}
-
-		if( socket != null ) {
-			int linger = getCmdLinger();
-			if( linger > 0 ) {
+	public void close() {
+		commandLock.lock();
+		try {
+			if(connected ) {
 				try {
-					socket.setSoLinger(true, linger);
-					/*
-					 *  The timeout overrides the linger, 
-					 *  Set the timeout to 1sec longer than linger
-					 */
-					socket.setSoTimeout((linger*1000)+1000);
-				} catch (SocketException e) {
-				}
-
+					ClientFtpResponse res = sendCommand(QUIT);
+					if( !res.isPositiveComplet()) {
+						logDebug("Invalid resp from quit ="+res);
+					}
+				} catch(Exception ex) {}
 			}
-			try {
-				socket.close();
-			} catch(Exception ex) {}
+
+			if( socket != null ) {
+				int linger = getCmdLinger();
+				if( linger > 0 ) {
+					try {
+						socket.setSoLinger(true, linger);
+						/*
+						 *  The timeout overrides the linger, 
+						 *  Set the timeout to 1sec longer than linger
+						 */
+						socket.setSoTimeout((linger*1000)+1000);
+					} catch (SocketException e) {
+					}
+
+				}
+				try {
+					socket.close();
+				} catch(Exception ex) {}
+			}
+			socket = null;
+			input = null;
+			output = null;
+			mlstTested = false;
+			connected = false;
+			currentType = null;
+			if( !isSecure() && channelSecure) {
+				//  reset these to defaults.
+				setSocketFactory(SocketFactory.getDefault());
+				setServerSocketFactory(ServerSocketFactory.getDefault());
+			}
+			// A new connection must negotiate AUTH again. Previously channelSecure stayed true,
+			// so a reconnect skipped AUTH and sent USER/PASS in clear text.
+			channelSecure = false;
+			dataChannelSecure = false;
+			sslSocket = null;
+			// a new session starts in the server's default directory
+			currentDir = null;
+			epsvRejected = false;
+		} finally {
+			commandLock.unlock();
 		}
-		socket = null;
-		input = null;
-		output = null;
-		mlstTested = false;
-		connected = false;
-		currentType = null;
-		if( !isSecure() && channelSecure) {
-			//  reset these to defaults.
-			setSocketFactory(SocketFactory.getDefault());
-			setServerSocketFactory(ServerSocketFactory.getDefault());
-		}
-		// A new connection must negotiate AUTH again. Previously channelSecure stayed true,
-		// so a reconnect skipped AUTH and sent USER/PASS in clear text.
-		channelSecure = false;
-		dataChannelSecure = false;
-		sslSocket = null;
-		// a new session starts in the server's default directory
-		currentDir = null;
-		epsvRejected = false;
 	}
 
 	/**
@@ -912,44 +939,49 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * @throws IOException
 	 * 
 	 */
-	public synchronized ClientFtpResponse executeCommand(String command) throws  IOException {
-		String name = firstToken(command);
-		if( !streamsInProcess.isEmpty() ) {
-			// One control connection can only run one transfer; interleaving commands with
-			// an open stream reads the wrong replies.
-			throw new IOException("A transfer is in progress ("+streamsInProcess.keySet()+"); close its stream before sending "
-					+name+", or use a separate FtpClient for concurrent transfers.");
-		}
-		boolean wasConnected = connected;
-		if( !connected ) {
-			reconnect();
-		}
-
-		peerClosed = false;
-		IOException failure = null;
-		ClientFtpResponse res = null;
+	public ClientFtpResponse executeCommand(String command) throws  IOException {
+		commandLock.lock();
 		try {
-			res = sendCommand(command);
-		} catch (java.net.SocketTimeoutException e) {
-			throw e;
-		} catch (IOException e) {
-			failure = e;
-		}
-		if( failure == null && !peerClosed ) {
-			return res;
-		}
+			String name = firstToken(command);
+			if( !streamsInProcess.isEmpty() ) {
+				// One control connection can only run one transfer; interleaving commands with
+				// an open stream reads the wrong replies.
+				throw new IOException("A transfer is in progress ("+streamsInProcess.keySet()+"); close its stream before sending "
+						+name+", or use a separate FtpClient for concurrent transfers.");
+			}
+			boolean wasConnected = connected;
+			if( !connected ) {
+				reconnect();
+			}
 
-		// The server closed the connection (e.g. idle timeout) or the network failed.
-		abandonConnection();
-		if( autoReconnect && wasConnected && RETRY_SAFE.contains(name) ) {
-			logInfo("Control connection to "+getHost()+" was closed, reconnecting to retry "+name);
-			reconnect();
-			return sendCommand(command);
+			peerClosed = false;
+			IOException failure = null;
+			ClientFtpResponse res = null;
+			try {
+				res = sendCommand(command);
+			} catch (java.net.SocketTimeoutException e) {
+				throw e;
+			} catch (IOException e) {
+				failure = e;
+			}
+			if( failure == null && !peerClosed ) {
+				return res;
+			}
+
+			// The server closed the connection (e.g. idle timeout) or the network failed.
+			abandonConnection();
+			if( autoReconnect && wasConnected && RETRY_SAFE.contains(name) ) {
+				logInfo("Control connection to "+getHost()+" was closed, reconnecting to retry "+name);
+				reconnect();
+				return sendCommand(command);
+			}
+			if( failure != null ) {
+				throw new IOException("Connection to "+getHost()+" lost during "+name+"; it will be reopened on the next command", failure);
+			}
+			return res; // the 421 left by a closed connection
+		} finally {
+			commandLock.unlock();
 		}
-		if( failure != null ) {
-			throw new IOException("Connection to "+getHost()+" lost during "+name+"; it will be reopened on the next command", failure);
-		}
-		return res; // the 421 left by a closed connection
 	}
 
 	/**
@@ -1064,62 +1096,67 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * @throws UnknownHostException
 	 * @throws IOException
 	 */
-	public synchronized boolean connect(String userId, String passwd, String account) throws IOException {
-		if( !connected ) {
-			if( socket == null ) {
-				applyTls12Fallback();
-			}
-			mlstTested = false;
-			currentType = null;
-			this.userId = userId;
-			this.password = passwd;
-			this.account = account;
-			logDebug("userid="+userId+" account="+account);
-
-			// connecting a socket will trigger the server to send us a greeting line
-			ClientFtpResponse res = readResponse();
-			if( res.isPositiveComplet()) {
-				if( !isSecure() ) {
-					boolean ok = executeAuth();
-					if( isRequireSecure() && !ok) {
-						return false;
-					}
+	public boolean connect(String userId, String passwd, String account) throws IOException {
+		commandLock.lock();
+		try {
+			if( !connected ) {
+				if( socket == null ) {
+					applyTls12Fallback();
 				}
+				mlstTested = false;
+				currentType = null;
+				this.userId = userId;
+				this.password = passwd;
+				this.account = account;
+				logDebug("userid="+userId+" account="+account);
 
-				res = sendCommand(USER+" "+userId);
-
-				if( res.isPositiveIntermediate()) {
-					res = sendCommand(PASS+" "+passwd);
-					// 332 asks for an account (RFC 959). A server may also answer 530 and
-					// accept the account in a following ACCT, as the BJL server does
-					// (user@account logins), so a configured account is tried once either way.
-					int code = res._getResponseCode();
-					if( account != null && !account.isEmpty()
-							&& (code == REPLY_332_NEED_ACCOUNT || code == REPLY_530_USER_NOT_LOGGED_IN)) {
-						res = sendCommand(ACCT+" "+account);
-					}
-				}
-
+				// connecting a socket will trigger the server to send us a greeting line
+				ClientFtpResponse res = readResponse();
 				if( res.isPositiveComplet()) {
-					connected = true;
-					if( isSecure() || isChannelSecure() ) {
-						negotiateDataProtection();
+					if( !isSecure() ) {
+						boolean ok = executeAuth();
+						if( isRequireSecure() && !ok) {
+							return false;
+						}
+					}
+
+					res = sendCommand(USER+" "+userId);
+
+					if( res.isPositiveIntermediate()) {
+						res = sendCommand(PASS+" "+passwd);
+						// 332 asks for an account (RFC 959). A server may also answer 530 and
+						// accept the account in a following ACCT, as the BJL server does
+						// (user@account logins), so a configured account is tried once either way.
+						int code = res._getResponseCode();
+						if( account != null && !account.isEmpty()
+								&& (code == REPLY_332_NEED_ACCOUNT || code == REPLY_530_USER_NOT_LOGGED_IN)) {
+							res = sendCommand(ACCT+" "+account);
+						}
+					}
+
+					if( res.isPositiveComplet()) {
+						connected = true;
+						if( isSecure() || isChannelSecure() ) {
+							negotiateDataProtection();
+						}
+					}
+
+				}
+
+				//  All done, if we're not connected we need to close socket
+				if( !connected) {
+					try {
+						close();	
+					} catch (Exception e) {
 					}
 				}
-
-			}
-
-			//  All done, if we're not connected we need to close socket
-			if( !connected) {
-				try {
-					close();	
-				} catch (Exception e) {
-				}
-			}
-		}    
+			}    
 
 
-		return connected;
+			return connected;
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 	protected FtpClient getNewConnection() throws  IOException {
@@ -1166,16 +1203,21 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * @throws IOException
 	 * @throws UnknownHostException
 	 */
-	public  synchronized boolean executeCwd(String dirName) throws IOException {
+	public boolean executeCwd(String dirName) throws IOException {
+		commandLock.lock();
+		try {
 
-		ClientFtpResponse res = executeCommand(CWD,dirName); 
-		boolean ret = res.isPositiveComplet();
-		// Force a PWD to get the correct value (also needed to restore it after a reconnect)
-		currentDir = null;
-		if( ret ) {
-			executePwd();
+			ClientFtpResponse res = executeCommand(CWD,dirName); 
+			boolean ret = res.isPositiveComplet();
+			// Force a PWD to get the correct value (also needed to restore it after a reconnect)
+			currentDir = null;
+			if( ret ) {
+				executePwd();
+			}
+			return ret;
+		} finally {
+			commandLock.unlock();
 		}
-		return ret;
 	}
 
 
@@ -1192,16 +1234,21 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	 * trip per file (BJL-34). The remembered type is forgotten when the connection is closed,
 	 * dropped or reopened, after REIN or a TYPE sent with executeCommand, and when TYPE fails.
 	 */
-	private synchronized boolean executeType(String type) throws IOException {
-		if( connected && type.equals(currentType) ) {
-			return true;
-		}
-		ClientFtpResponse res = executeCommand(TYPE,type);
-		boolean ret = res.isPositiveComplet();
-		// executeCommand may have reconnected; the type is set on the connection in use now
-		currentType = ret ? type : null;
+	private boolean executeType(String type) throws IOException {
+		commandLock.lock();
+		try {
+			if( connected && type.equals(currentType) ) {
+				return true;
+			}
+			ClientFtpResponse res = executeCommand(TYPE,type);
+			boolean ret = res.isPositiveComplet();
+			// executeCommand may have reconnected; the type is set on the connection in use now
+			currentType = ret ? type : null;
 
-		return ret;
+			return ret;
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 	/**
@@ -1278,8 +1325,13 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	/**
 	 * @return true is currently connected to a server.
 	 */
-	public synchronized boolean isConnected() {
-		return connected;
+	public boolean isConnected() {
+		commandLock.lock();
+		try {
+			return connected;
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 
@@ -1419,7 +1471,8 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	public boolean isMlstSupported() throws IOException {
 
 		if( !mlstTested ) {
-			synchronized (this) {
+			commandLock.lock();
+			try {
 				if( !mlstTested ) {
 
 					String tmp = (String) getFeatResponse().get(MLST);
@@ -1442,6 +1495,8 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 						mlstSupported = res.isPositiveComplet();						
 					}
 				}
+			} finally {
+				commandLock.unlock();
 			}
 		}
 
@@ -1469,9 +1524,14 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	}
 
 
-	public synchronized String[] executeList(boolean dontUseMlst, String dirPath) throws IOException {
-		// Pass the choice down instead of temporarily changing the shared forceList field
-		return list(dirPath, dontUseMlst);
+	public String[] executeList(boolean dontUseMlst, String dirPath) throws IOException {
+		commandLock.lock();
+		try {
+			// Pass the choice down instead of temporarily changing the shared forceList field
+			return list(dirPath, dontUseMlst);
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 	/**
@@ -1481,8 +1541,13 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	 * @return The list of file entries for the specified directory.
 	 * @throws IOException
 	 */
-	public synchronized String[] executeList(String dirPath) throws IOException {
-		return list(dirPath, forceList);
+	public String[] executeList(String dirPath) throws IOException {
+		commandLock.lock();
+		try {
+			return list(dirPath, forceList);
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 	private String[] list(String dirPath, boolean useList) throws IOException {
@@ -1585,18 +1650,23 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	 * @return
 	 * @throws IOException
 	 */
-	public synchronized InputStream getInputStream(String path, boolean ascii, long startingPos) throws IOException {
-		checkStreamInProcess(path);
-		ClientFtpInputStream ret;
+	public InputStream getInputStream(String path, boolean ascii, long startingPos) throws IOException {
+		commandLock.lock();
 		try {
-			ret = new ClientFtpInputStream(path,this,ascii, startingPos);
-		} catch (Tls12Needed e) {
-			fallBackToTls12(e);
-			ret = new ClientFtpInputStream(path,this,ascii, startingPos);
-		}
-		streamsInProcess.put(path, ret);
+			checkStreamInProcess(path);
+			ClientFtpInputStream ret;
+			try {
+				ret = new ClientFtpInputStream(path,this,ascii, startingPos);
+			} catch (Tls12Needed e) {
+				fallBackToTls12(e);
+				ret = new ClientFtpInputStream(path,this,ascii, startingPos);
+			}
+			streamsInProcess.put(path, ret);
 
-		return ret;
+			return ret;
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 	/**
@@ -1624,20 +1694,25 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		return getOutputStream(path,false,true);
 	}
 
-	public synchronized OutputStream getOutputStream(String path, boolean ascii, boolean append) throws IOException {
-		checkStreamInProcess(path);
-
-		ClientFtpOutputStream ret;
+	public OutputStream getOutputStream(String path, boolean ascii, boolean append) throws IOException {
+		commandLock.lock();
 		try {
-			ret = new ClientFtpOutputStream(path,this,ascii, append);
-		} catch (Tls12Needed e) {
-			// nothing was written yet
-			fallBackToTls12(e);
-			ret = new ClientFtpOutputStream(path,this,ascii, append);
-		}
-		streamsInProcess.put(path, ret);
+			checkStreamInProcess(path);
 
-		return ret;
+			ClientFtpOutputStream ret;
+			try {
+				ret = new ClientFtpOutputStream(path,this,ascii, append);
+			} catch (Tls12Needed e) {
+				// nothing was written yet
+				fallBackToTls12(e);
+				ret = new ClientFtpOutputStream(path,this,ascii, append);
+			}
+			streamsInProcess.put(path, ret);
+
+			return ret;
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 
@@ -1668,12 +1743,17 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		return ret;
 	}
 
-	private synchronized void checkStreamInProcess(String path) throws IOException {
-		// Any open stream blocks the control connection, not just one for the same path
-		if( !streamsInProcess.isEmpty()) {
-			throw new IOException("A transfer is in progress ("+streamsInProcess.keySet()+"). Close its stream before starting "
-					+path+", or use a separate FtpClient for concurrent transfers.");
-		}	
+	private void checkStreamInProcess(String path) throws IOException {
+		commandLock.lock();
+		try {
+			// Any open stream blocks the control connection, not just one for the same path
+			if( !streamsInProcess.isEmpty()) {
+				throw new IOException("A transfer is in progress ("+streamsInProcess.keySet()+"). Close its stream before starting "
+						+path+", or use a separate FtpClient for concurrent transfers.");
+			}	
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 	public boolean mkDir(String path) throws IOException {
@@ -1913,12 +1993,17 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 
 	}
 
-	protected synchronized void streamHasClosed(String path, AutoCloseable stream) {
-		AutoCloseable obj = streamsInProcess.remove(path);
-		if( obj == null ) {
-			logInfo(path+" did not have a stream in process.");
-		}
+	protected void streamHasClosed(String path, AutoCloseable stream) {
+		commandLock.lock();
+		try {
+			AutoCloseable obj = streamsInProcess.remove(path);
+			if( obj == null ) {
+				logInfo(path+" did not have a stream in process.");
+			}
 
+		} finally {
+			commandLock.unlock();
+		}
 	}
 
 	@Override

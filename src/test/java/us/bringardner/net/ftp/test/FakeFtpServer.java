@@ -27,11 +27,13 @@ class FakeFtpServer implements AutoCloseable {
 	/** Close connection #1 (without replying) when this command arrives, e.g. "PWD" */
 	volatile String dropFirstConnectionOn = null;
 	volatile byte[] data = "fake data".getBytes(StandardCharsets.UTF_8);
+	/** When set, NOOP is answered only after this latch is released (a slow server). */
+	volatile java.util.concurrent.CountDownLatch holdNoop = null;
 	private volatile boolean running = true;
 	private int connections = 0;
 
 	FakeFtpServer() throws IOException {
-		listener = new ServerSocket(0, 5, InetAddress.getByName("127.0.0.1"));
+		listener = new ServerSocket(0, 200, InetAddress.getByName("127.0.0.1"));
 		Thread t = new Thread(this::acceptLoop, "FakeFtpServer");
 		t.setDaemon(true);
 		t.start();
@@ -77,7 +79,19 @@ class FakeFtpServer implements AutoCloseable {
 				switch (cmd) {
 				case "USER": reply(out, "331 password please"); break;
 				case "PASS": reply(out, "230 logged in"); break;
-				case "TYPE": case "NOOP": reply(out, "200 ok"); break;
+				case "NOOP":
+					java.util.concurrent.CountDownLatch hold = holdNoop;
+					if (hold != null) {
+						try {
+							hold.await();
+						} catch (InterruptedException e) {
+							Thread.currentThread().interrupt();
+							return;
+						}
+					}
+					reply(out, "200 ok");
+					break;
+				case "TYPE": reply(out, "200 ok"); break;
 				case "FEAT": reply(out, "211 no features"); break;
 				case "CWD": cwd = arg.startsWith("/") ? arg : (cwd.endsWith("/") ? cwd : cwd + "/") + arg; reply(out, "250 ok"); break;
 				case "PWD": reply(out, "257 \"" + cwd + "\" is current directory"); break;

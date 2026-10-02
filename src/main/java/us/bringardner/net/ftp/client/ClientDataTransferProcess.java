@@ -47,6 +47,8 @@ import us.bringardner.net.ftp.FTP;
 public abstract class ClientDataTransferProcess extends BaseObject implements Runnable,FTP {
 
 	private FtpClient client;
+	/** Guards connecting the data socket (a lock, not a monitor: it connects, BJL-58). */
+	private final java.util.concurrent.locks.ReentrantLock socketLock = new java.util.concurrent.locks.ReentrantLock();
 	private volatile Socket socket;
 	private boolean passive = false;
 	private InputStream input;
@@ -234,7 +236,8 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 	
 	public Socket getSocket() throws IOException {
 		if( socket == null ) {
-			synchronized (this) {
+			socketLock.lock();
+			try {
 				if( socket == null ) {
 					Socket tmp = null;
 					if(isPassive()) {
@@ -256,6 +259,8 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 					socket = tmp;
 				}
 				
+			} finally {
+				socketLock.unlock();
 			}
 		}
 
