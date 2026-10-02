@@ -156,6 +156,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private volatile boolean mlstTested = false;
 	private volatile boolean mlstSupported = false;
 	private int transferBufferSize = 1024*65;
+	private int socketBufferSize = 0;
 	private boolean usePasvAddress = false;
 	private boolean active = false;
 	private volatile boolean channelSecure;
@@ -398,8 +399,35 @@ public class FtpClient extends SecureBaseObject implements FTP {
 		this.active = active;
 	}
 
+	/**
+	 * Size (bytes) of the stream buffers used to copy transfer data (at least 8 KB).
+	 * It no longer sets the data sockets' TCP buffers, see {@link #setSocketBufferSize(int)}.
+	 */
 	public void setTransferBufferSize(int transferBufferSize) {
 		this.transferBufferSize = transferBufferSize;
+	}
+
+	/**
+	 * TCP buffer size (SO_RCVBUF / SO_SNDBUF) for data connections, in bytes.
+	 * <p>
+	 * 0 (the default) leaves them to the operating system, which grows them as a transfer
+	 * needs (TCP autotuning, several MB on Linux, macOS and Windows). Setting a size turns
+	 * autotuning off for that connection, and throughput is then limited to about
+	 * size / round-trip time whatever the link speed: 64 KB at 50 ms is about 1.3 MB/s.
+	 * Only set it to limit memory or bandwidth, or for an OS without autotuning (BJL-29;
+	 * this used to be fixed at the transfer buffer size, 65 KB).
+	 * @param socketBufferSize bytes, or 0 for the operating system's default
+	 */
+	public void setSocketBufferSize(int socketBufferSize) {
+		if( socketBufferSize < 0 ) {
+			throw new IllegalArgumentException("socketBufferSize must be >= 0");
+		}
+		this.socketBufferSize = socketBufferSize;
+	}
+
+	/** @return the data connections' TCP buffer size, 0 for the operating system's default */
+	public int getSocketBufferSize() {
+		return socketBufferSize;
 	}
 
 	/**

@@ -164,6 +164,10 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 			svr.setSoTimeout(client.getTransferTimeout());
 			Socket ret = svr.accept();
 			ret.setSoTimeout(client.getTransferTimeout());
+			if( client.getSocketBufferSize() > 0 ) {
+				// the receive size comes from the listener
+				ret.setSendBufferSize(client.getSocketBufferSize());
+			}
 			if( client.isDataChannelSecure() ) {
 				// resumes the control connection's TLS session (BJL-18)
 				ret = client.secureDataSocket(ret);
@@ -189,12 +193,13 @@ public abstract class ClientDataTransferProcess extends BaseObject implements Ru
 	private Socket getClientSocket() throws UnknownHostException, IOException {
 		FtpClient client = getClient();
 		// Plain TCP first; TLS is added once connected so it can resume the control
-		// connection's session (BJL-18). Created unconnected so buffer sizes apply to the
-		// connection (they must be set before connect for TCP window scaling) and so we can
-		// use a connect timeout.
+		// connection's session (BJL-18). Created unconnected so a socket buffer size (if one is
+		// configured) applies to the connection (it must be set before connect for TCP window
+		// scaling) and so we can use a connect timeout. By default the OS sizes the buffers
+		// (TCP autotuning, BJL-29).
 		Socket ret = SocketFactory.getDefault().createSocket();
 		try {
-			int bufSz = client.getTransferBufferSize();
+			int bufSz = client.getSocketBufferSize();
 			if( bufSz > 0 ) {
 				ret.setReceiveBufferSize(bufSz);
 				ret.setSendBufferSize(bufSz);

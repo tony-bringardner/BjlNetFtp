@@ -50,7 +50,9 @@ public class ClientActiveDataConnection extends ClientDataTransferProcess {
         java.net.InetAddress local = client.getControlLocalAddress();
         java.net.ServerSocket listener = new java.net.ServerSocket();
         try {
-            int bufSz = client.getTransferBufferSize();
+            // Accepted sockets inherit the listener's buffer size; by default the OS sizes
+            // them (TCP autotuning, BJL-29)
+            int bufSz = client.getSocketBufferSize();
             if( bufSz > 0 ) {
                 listener.setReceiveBufferSize(bufSz);
             }

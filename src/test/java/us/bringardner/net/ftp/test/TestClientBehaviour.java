@@ -124,6 +124,54 @@ public class TestClientBehaviour {
 		}
 	}
 
+	/** Runs a listing in passive mode and returns its data socket's receive buffer size. */
+	private static int passiveDataSocketBuffer(int socketBufferSize) throws Exception {
+		java.util.concurrent.atomic.AtomicInteger size = new java.util.concurrent.atomic.AtomicInteger(-1);
+		FtpClient c = new FtpClient("localhost", PORT) {
+			@Override
+			protected us.bringardner.net.ftp.client.ClientDataTransferProcess getDataTransferProcess() throws IOException {
+				us.bringardner.net.ftp.client.ClientDataTransferProcess ret = super.getDataTransferProcess();
+				// passive mode connects before the command anyway
+				size.set(ret.getSocket().getReceiveBufferSize());
+				return ret;
+			}
+		};
+		c.setRequestSecure(false);
+		c.getLogger().setLevel(Level.ERROR);
+		c.setSocketBufferSize(socketBufferSize);
+		assertTrue(c.connect("anonymous", "x", null));
+		try {
+			// a listing opens the data connection through getDataTransferProcess
+			c.executeList();
+			return size.get();
+		} finally {
+			c.close();
+		}
+	}
+
+	/**
+	 * Data sockets keep the OS's buffer size (TCP autotuning) unless one is configured (BJL-29).
+	 * A fixed 65 KB buffer used to cap transfers at about 1.4 MB/s at 50 ms round-trip time.
+	 */
+	@Test
+	public void dataSocketsUseTheOsBufferSizeByDefault() throws Exception {
+		int osDefault;
+		try (java.net.Socket fresh = new java.net.Socket()) {
+			osDefault = fresh.getReceiveBufferSize();
+		}
+		assertEquals(osDefault, passiveDataSocketBuffer(0), "receive buffer left to the OS");
+
+		int configured = passiveDataSocketBuffer(16384);
+		assertTrue(configured >= 16384 && configured != osDefault, "configured receive buffer: "+configured);
+	}
+
+	@Test
+	public void socketBufferSizeMustNotBeNegative() {
+		FtpClient c = new FtpClient("localhost", PORT);
+		assertEquals(0, c.getSocketBufferSize());
+		org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> c.setSocketBufferSize(-1));
+	}
+
 	@Test
 	public void truncatedDownloadIsReported() throws Exception {
 		FtpClient c = client();
