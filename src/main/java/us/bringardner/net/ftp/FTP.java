@@ -213,6 +213,7 @@ public interface FTP {
 	public static final int REPLY_550_ACTION_NOT_TAKEN = 550;// Requested action not taken.        File unavailable (e.g., file not found, no access).
 	
 	public static final int REPLY_553_FILE_NAME_NOT_ALLOWED = 553;// Requested action not taken. File name not allowed.
+	public static final int REPLY_554_INVALID_REST = 554;// Requested action not taken: invalid REST parameter (RFC 3659 section 5.5).
 	public static final int REPLY_551_ACTION_ABORTED = 551;// Requested action aborted. Page type unknown.
 	/*
     452 Requested action not taken.

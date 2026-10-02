@@ -358,6 +358,25 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 	}
 
 	public static String formatFile(FileSource file, FtpRequestProcessor processor) throws IOException{
+		return formatFile(file, processor, currentDirPath(processor));
+	}
+
+	/**
+	 * The current directory's path as {@link #formatFile(FileSource, FtpRequestProcessor, String)}
+	 * compares it. Work it out once per listing, not per entry (BJL-32).
+	 */
+	public static String currentDirPath(FtpRequestProcessor processor) {
+		FileSource cwd = processor.getCurrentDir();
+		return cwd == null ? null : FtpRequestProcessor.normalizePath(cwd.getAbsolutePath());
+	}
+
+	/**
+	 * @param file the entry
+	 * @param processor the session
+	 * @param cwdPath {@link #currentDirPath(FtpRequestProcessor)}, worked out once per listing
+	 * @return the MLSx facts and name of the entry
+	 */
+	public static String formatFile(FileSource file, FtpRequestProcessor processor, String cwdPath) throws IOException{
 
 		Map<String, Integer> factsWanted = getWantedFacts(processor);
 
@@ -381,10 +400,15 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 			break;
 			case FACT_TYPE:
 				if( file.isDirectory() ){
-					FileSource cwd = processor.getCurrentDir();
-					if( cwd.equals(file)){
+					/*
+					 * Compared by path, as the client sees the tree (links not followed). This
+					 * used to call equals() and isChildOfMine() (two canonical path lookups,
+					 * file system calls or network round trips) for every directory entry.
+					 */
+					String path = FtpRequestProcessor.normalizePath(file.getAbsolutePath());
+					if( cwdPath != null && cwdPath.equals(path)){
 						val = ("cdir");
-					} else if( file.isChildOfMine(cwd)){
+					} else if( cwdPath != null && FtpRequestProcessor.isSameOrBelow(cwdPath, path)){
 						val=("pdir");
 					} else {
 						val=("dir");

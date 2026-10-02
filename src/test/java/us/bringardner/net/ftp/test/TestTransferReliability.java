@@ -243,6 +243,39 @@ public class TestTransferReliability {
 		}
 	}
 
+	/** REST then RETR sends the rest of the file, opened at the offset (BJL-33). */
+	@Test
+	public void restartedDownloadSendsTheRest() throws Exception {
+		try (Session s = new Session()) {
+			s.put("restget.txt", "Hello World".getBytes(StandardCharsets.UTF_8));
+			s.send("REST 6");
+			s.expect(350);
+			assertArrayEquals("World".getBytes(StandardCharsets.UTF_8), s.get("restget.txt"));
+			// REST applies to one transfer only
+			assertArrayEquals("Hello World".getBytes(StandardCharsets.UTF_8), s.get("restget.txt"));
+			// at the end: nothing left to send
+			s.send("REST 11");
+			s.expect(350);
+			assertArrayEquals(new byte[0], s.get("restget.txt"));
+		}
+	}
+
+	/** RFC 3659 section 5.5: a restart point past the end of the file gets 554. */
+	@Test
+	public void restPastTheEndGets554() throws Exception {
+		try (Session s = new Session()) {
+			s.put("restshort.txt", "short".getBytes(StandardCharsets.UTF_8));
+			try (Socket data = s.pasv()) {
+				s.send("REST 6");
+				s.expect(350);
+				s.send("RETR restshort.txt");
+				s.expect(554);
+			}
+			// the session goes on, and the next RETR starts at 0
+			assertArrayEquals("short".getBytes(StandardCharsets.UTF_8), s.get("restshort.txt"));
+		}
+	}
+
 	// ------------------------------------------------------------------ active mode (PORT / EPRT)
 
 	@Test

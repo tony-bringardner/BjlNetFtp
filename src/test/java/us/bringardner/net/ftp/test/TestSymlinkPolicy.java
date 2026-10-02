@@ -154,6 +154,80 @@ public class TestSymlinkPolicy {
 		}
 	}
 
+	/** MLSD entries by name (BJL-32 replaced per-entry lookups; the results must not change) */
+	private static java.util.Map<String, String> mlsd(Session s, String path) throws IOException {
+		java.util.Map<String, String> ret = new java.util.TreeMap<>();
+		String text;
+		try (java.net.Socket data = s.pasv()) {
+			s.send("MLSD " + path);
+			s.expectPreliminary();
+			text = new String(data.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+		}
+		s.expectComplete();
+		for (String line : text.split("\r\n")) {
+			int sp = line.indexOf(' ');
+			if (sp > 0) {
+				ret.put(line.substring(sp + 1), line.substring(0, sp).toLowerCase());
+			}
+		}
+		return ret;
+	}
+
+	private static String fact(String facts, String name) {
+		for (String f : facts.split(";")) {
+			if (f.startsWith(name + "=")) {
+				return f.substring(name.length() + 1);
+			}
+		}
+		return null;
+	}
+
+	@Test
+	public void mlsdPermissionsFollowThePolicy() throws Exception {
+		try (Session s = new Session(PORT)) {
+			java.util.Map<String, String> strict = mlsd(s, "/");
+			assertTrue(!fact(strict.get("inside.txt"), "perm").isEmpty(), strict.toString());
+			assertEquals("", fact(strict.get("out"), "perm"), "a link out gets no permissions: " + strict);
+			assertEquals("", fact(strict.get("shared"), "perm"), strict.toString());
+		}
+		server.setSymlinkPolicy(SymlinkPolicy.ALLOWED_TARGETS);
+		server.setAllowedLinkTargets(Arrays.asList(shared.getAbsolutePath()));
+		try (Session s = new Session(PORT)) {
+			java.util.Map<String, String> allowed = mlsd(s, "/");
+			assertTrue(!fact(allowed.get("shared"), "perm").isEmpty(), allowed.toString());
+			assertEquals("", fact(allowed.get("out"), "perm"), allowed.toString());
+		}
+	}
+
+	/** The allowed targets are cached per session, but a change on the server takes effect. */
+	@Test
+	public void allowedTargetsChangesApplyToOpenSessions() throws Exception {
+		server.setSymlinkPolicy(SymlinkPolicy.ALLOWED_TARGETS);
+		try (Session s = new Session(PORT)) {
+			assertEquals(550, size(s, "shared/doc.txt"));
+			server.setAllowedLinkTargets(Arrays.asList(shared.getAbsolutePath()));
+			assertEquals(213, size(s, "shared/doc.txt"));
+			server.setAllowedLinkTargets(Collections.emptyList());
+			assertEquals(550, size(s, "shared/doc.txt"));
+		}
+	}
+
+	/** type=cdir / pdir / dir, now worked out from paths (BJL-32) */
+	@Test
+	public void mlsdDirectoryTypes() throws Exception {
+		assertTrue(new File(root, "a/b").mkdirs() || new File(root, "a/b").isDirectory());
+		assertTrue(new File(root, "a/c").mkdirs() || new File(root, "a/c").isDirectory());
+		try (Session s = new Session(PORT)) {
+			s.send("CWD a/b");
+			assertEquals(250, s.read(5000).code);
+			assertEquals("pdir", fact(mlsd(s, "/").get("a"), "type"), "an ancestor of the current directory");
+			java.util.Map<String, String> a = mlsd(s, "/a");
+			assertEquals("cdir", fact(a.get("b"), "type"), "the current directory");
+			assertEquals("dir", fact(a.get("c"), "type"));
+			assertEquals("file", fact(mlsd(s, "/").get("inside.txt"), "type"));
+		}
+	}
+
 	private static int size(Session s, String path) throws IOException {
 		s.send("SIZE " + path);
 		return s.read(5000).code;

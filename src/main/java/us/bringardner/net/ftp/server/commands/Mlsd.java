@@ -213,7 +213,8 @@ public class Mlsd  extends BaseCommand  implements FeatCommand {
 			processor.reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't get a data socket");
 		} else {
 			// some clients will complain if the output is empty
-			sendListing(processor, sock, list, file -> Mlst.formatFile(file, processor).trim(),
+			String cwdPath = Mlst.currentDirPath(processor);
+			sendListing(processor, sock, list, file -> Mlst.formatFile(file, processor, cwdPath).trim(),
 					"Opening Binary mode data connection for file list", true);
 		}
 	}

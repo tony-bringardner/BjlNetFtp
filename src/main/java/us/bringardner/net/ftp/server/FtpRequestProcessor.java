@@ -141,6 +141,11 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	private String rootName ;
 	/** The root's absolute path with "." and ".." resolved lexically (symbolic links NOT resolved) */
 	private String rootAbsolute;
+	/** normalize(rootName), computed once per root (BJL-32) */
+	private String rootCanonical;
+	/** The server's allowed link targets and their canonical forms, cached per session (BJL-32) */
+	private java.util.List<String> allowedTargetsFor;
+	private java.util.List<String> allowedTargetsCanonical;
 	private int rootNameLen = 0;
 	private FileSource ftpRoot ;
 	private FileSource currentDir ;
@@ -194,6 +199,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		}
 		rootNameLen = rootName.length();
 		rootAbsolute = normalize(ftpRoot.getAbsolutePath());
+		rootCanonical = normalize(rootName);
 
 		setCurrentDir(ftpRoot);
 	}
@@ -355,7 +361,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		try {
 			// 1. Lexically inside the root (".." resolved, links not followed)
 			String lexical = normalize(file.getAbsolutePath());
-			if( relativeTo(lexical, rootAbsolute) == null && relativeTo(lexical, normalize(rootName)) == null ) {
+			if( relativeTo(lexical, rootAbsolute) == null && relativeTo(lexical, rootCanonical) == null ) {
 				return false;
 			}
 			FtpServer.SymlinkPolicy policy = getSymlinkPolicy();
@@ -364,7 +370,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			}
 			// 2. Where it really is
 			String canonical = normalize(file.getCanonicalPath());
-			if( relativeTo(canonical, normalize(rootName)) != null ) {
+			if( relativeTo(canonical, rootCanonical) != null ) {
 				return true;
 			}
 			if( policy == FtpServer.SymlinkPolicy.ALLOWED_TARGETS ) {
@@ -386,17 +392,45 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		return server instanceof FtpServer ? ((FtpServer)server).getSymlinkPolicy() : FtpServer.SymlinkPolicy.STRICT;
 	}
 
-	private java.util.List<String> allowedTargetsCanonical() throws IOException {
-		java.util.List<String> ret = new java.util.ArrayList<String>();
+	/**
+	 * The allowed link targets, canonical. Built once and rebuilt only when the server's list
+	 * changes: it used to create a FileSource and resolve every target for every file checked,
+	 * e.g. for each entry of an MLSD listing (BJL-32).
+	 */
+	private synchronized java.util.List<String> allowedTargetsCanonical() throws IOException {
 		IServer server = getServer();
 		if( !(server instanceof FtpServer) ) {
-			return ret;
+			return java.util.Collections.emptyList();
 		}
-		for(String t : ((FtpServer)server).getAllowedLinkTargets()) {
-			FileSource dir = getFactory().createFileSource(t);
-			ret.add(normalize(dir.getCanonicalPath()));
+		java.util.List<String> targets = ((FtpServer)server).getAllowedLinkTargets();
+		if( allowedTargetsCanonical == null || !targets.equals(allowedTargetsFor) ) {
+			java.util.List<String> ret = new java.util.ArrayList<String>();
+			for(String t : targets) {
+				FileSource dir = getFactory().createFileSource(t);
+				ret.add(normalize(dir.getCanonicalPath()));
+			}
+			allowedTargetsFor = new java.util.ArrayList<String>(targets);
+			allowedTargetsCanonical = java.util.Collections.unmodifiableList(ret);
 		}
-		return ret;
+		return allowedTargetsCanonical;
+	}
+
+	/**
+	 * A path with "/" separators and "." and ".." resolved, without touching the file system.
+	 * @param path a file system path
+	 * @return the normalized path
+	 */
+	public static String normalizePath(String path) {
+		return normalize(path);
+	}
+
+	/**
+	 * @param path a normalized path
+	 * @param dir a normalized path
+	 * @return true if path is dir or below it (lexically)
+	 */
+	public static boolean isSameOrBelow(String path, String dir) {
+		return relativeTo(path, dir) != null;
 	}
 
 	/**
@@ -775,8 +809,24 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			return;
 		}
 
+		/*
+		 * Restart (REST): open the file at that position. FileSources can do this without
+		 * reading the skipped part (an SFTP or database read from an offset); skipping through
+		 * the stream read and threw away every byte before it on such file systems (BJL-33).
+		 */
+		Long rest = (Long)removeTempValue(REST);
+		long startAt = rest == null ? 0 : rest.longValue();
+		if( startAt > 0 ) {
+			long size = local.length();
+			if( startAt > size ) {
+				// RFC 3659 section 5.5
+				reply(REPLY_554_INVALID_REST,"Invalid REST "+startAt+": "+ftpFileName+" is "+size+" bytes");
+				return;
+			}
+		}
+
 		try {
-			in = local.getInputStream();
+			in = startAt > 0 ? local.getInputStream(startAt) : local.getInputStream();
 		} catch(Exception ex) {
 			logError("Error creating stream",ex);
 			reply(REPLY_450_FILE_ACTION_FAILED,"Can't create stream, "+ex);
@@ -800,18 +850,6 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 				return;
 			}
 
-			//  Check for a restart
-			long skipped =0l;
-			Long rest = (Long)removeTempValue(REST);
-			if( rest != null ){
-				long nb = rest.longValue();
-				skipped = skipFully(in, nb); 
-				logDebug("REST ="+rest+" skipped ="+skipped);
-				if(skipped != nb) {
-					reply(REPLY_450_FILE_ACTION_FAILED,"Can't skip "+nb+" bytes.  Skipped = "+skipped);
-					return;
-				}
-			}
 			transferStream(in, out, sock, false, null);
 			// From here on the transfer (or StreamController on refusal) owns the stream
 			started = true;
