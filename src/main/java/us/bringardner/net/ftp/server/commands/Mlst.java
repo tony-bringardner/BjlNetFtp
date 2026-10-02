@@ -218,9 +218,9 @@ public class Mlst  extends BaseCommand  implements FeatCommand {
 		String entry = formatFile(target, processor).trim();
 		// formatFile ends with the bare name; MLST shows the whole pathname
 		entry = entry.substring(0, entry.length()-target.getName().length())+path;
-		processor.reply(REPLY_250_FILE_ACTION_OK+"- Listing "+path);
-		processor.reply(" "+entry);
-		processor.reply(REPLY_250_FILE_ACTION_OK,"End");
+		// one flush for the three lines (BJL-35)
+		String code = processor.translateResponseCode(REPLY_250_FILE_ACTION_OK);
+		processor.reply(java.util.Arrays.asList(code+"- Listing "+path, " "+entry, code+" End"));
 	}
 
 	public static String formatPerms(FileSource file, FtpRequestProcessor processor) throws IOException {

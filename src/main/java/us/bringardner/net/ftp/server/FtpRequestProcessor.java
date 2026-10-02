@@ -591,6 +591,20 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 	}
 
 	/**
+	 * Several reply lines (a multi-line reply) sent with one flush, so they go out together
+	 * instead of one TCP segment / TLS record per line (BJL-35). Each line goes through
+	 * {@link #hideRealPaths(String)} like any other reply.
+	 */
+	@Override
+	public synchronized void reply(java.util.List<String> lines) throws IOException {
+		java.util.List<String> safe = new java.util.ArrayList<String>(lines.size());
+		for (String line : lines) {
+			safe.add(hideRealPaths(line));
+		}
+		super.reply(safe);
+	}
+
+	/**
 	 * A one-line reply sent as is, without {@link #hideRealPaths(String)}. Only for text the
 	 * client supplied itself, such as the path an administrator gave to SITE root.
 	 */
@@ -693,16 +707,19 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			return;
 		}
 		String code = translateResponseCode(responseCode);
-		reply(code+"-"+lines[0]);
+		java.util.List<String> out = new java.util.ArrayList<String>(last+1);
+		out.add(code+"-"+lines[0]);
 		for (int idx = 1; idx < last; idx++) {
 			String line = lines[idx];
 			// a line in the middle must not look like a reply of its own (RFC 959 4.2)
 			if( line.length() >= 3 && Character.isDigit(line.charAt(0)) && Character.isDigit(line.charAt(1)) && Character.isDigit(line.charAt(2))) {
 				line = " "+line;
 			}
-			reply(line);
+			out.add(line);
 		}
-		super.reply(responseCode, lines[last]);
+		out.add(code+" "+lines[last]);
+		// one flush for the whole reply (BJL-35)
+		reply(out);
 	}
 
 	public Object getTempValue(String key){

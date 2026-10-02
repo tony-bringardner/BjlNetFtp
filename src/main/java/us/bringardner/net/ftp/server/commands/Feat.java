@@ -67,17 +67,21 @@ public class Feat extends NoAuthReqBaseCommand {
 	public void execute(FtpRequestProcessor processor, IRequestContext context)
 		throws IOException {
 		
-		processor.reply(REPLY_211_SYSTEM_STATUS+"- Supported Extentions");
+		// RFC 2389: "211-...", one line per feature starting with a space, "211 End",
+		// sent with one flush (BJL-35)
+		java.util.List<String> lines = new java.util.ArrayList<String>();
+		lines.add(REPLY_211_SYSTEM_STATUS+"-Extensions supported:");
 		Iterator<FeatCommand> it = supported.values().iterator();
 		
 		while( it.hasNext() ){
 			FeatCommand cmd = (FeatCommand)it.next();
 			String val = cmd.getFeatResponse(processor);
 			if( val != null && val.length()>0 ){
-				processor.reply(" "+cmd.getFeatResponse(processor));
+				lines.add(" "+val);
 			}
 		}
-		processor.reply(REPLY_211_SYSTEM_STATUS," End");
+		lines.add(processor.translateResponseCode(REPLY_211_SYSTEM_STATUS)+" End");
+		processor.reply(lines);
 		
 
 	}
