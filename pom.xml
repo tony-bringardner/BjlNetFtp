@@ -156,7 +156,7 @@
 		<dependency>
 			<groupId>us.bringardner</groupId>
 			<artifactId>bjl_file_system</artifactId>
-			<version>1.0.1</version>
+			<version>1.0.2-SNAPSHOT</version>
 		</dependency>
 		<dependency>
 			<groupId>us.bringardner</groupId>
