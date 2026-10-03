@@ -145,7 +145,9 @@ public abstract class TestFtpBaseTestClass {
 			// no shell: arguments are passed as they are, on every OS
 			Process p = new ProcessBuilder(keytool, "-genkeypair", "-noprompt",
 					"-alias", TEST_KEY_ALIAS,
-					"-dname", "CN=bringardner.us, OU=AA, O=BBB, L=Bringardner, ST=CCCC, C=DD",
+					//  For localhost, so the client's host name check passes (the tests connect to localhost / 127.0.0.1)
+					"-dname", "CN=localhost, OU=AA, O=BBB, L=Bringardner, ST=CCCC, C=DD",
+					"-ext", "SAN=dns:localhost,ip:127.0.0.1",
 					"-keystore", file.getPath(), "-storetype", "PKCS12",
 					"-storepass", TEST_KEYSTORE_PASSWORD, "-keypass", TEST_KEYSTORE_PASSWORD,
 					"-keyalg", "RSA", "-keysize", "2048", "-sigalg", "SHA256withRSA",
@@ -172,7 +174,7 @@ public abstract class TestFtpBaseTestClass {
 		}
 	}
 
-	/** Loads, holds the key, and its certificate is valid for at least another day. */
+	/** Loads, holds the key, its certificate is valid for at least another day and is for localhost. */
 	public static boolean isUsableKeystore(File file) {
 		if( !file.isFile()) {
 			return false;
@@ -188,7 +190,9 @@ public abstract class TestFtpBaseTestClass {
 				return false;
 			}
 			((X509Certificate) cert).checkValidity(new java.util.Date(System.currentTimeMillis()+TimeUnit.DAYS.toMillis(1)));
-			return true;
+			//  Made before the certificate was for localhost: make a new one
+			java.util.Collection<java.util.List<?>> names = ((X509Certificate) cert).getSubjectAlternativeNames();
+			return names != null && names.stream().anyMatch(n -> "localhost".equals(n.get(1)));
 		} catch (Exception e) {
 			// unreadable, wrong password, expired...: make a new one
 			return false;

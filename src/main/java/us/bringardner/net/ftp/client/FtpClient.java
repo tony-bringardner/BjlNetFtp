@@ -55,6 +55,7 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 import us.bringardner.core.SecureBaseObject;
+import us.bringardner.core.util.TlsSockets;
 import us.bringardner.io.CRLFLineReader;
 import us.bringardner.io.CRLFLineWriter;
 import us.bringardner.net.ftp.FTP;
@@ -116,6 +117,10 @@ public class FtpClient extends SecureBaseObject implements FTP {
 	private ServerSocketFactory serverSocketFactory = ServerSocketFactory.getDefault();
 
 	private boolean requestSecure = true;
+	/** "false" turns off the host name check for secure connections, see {@link #isVerifyHostname()}. */
+	public static final String PROPERTY_VERIFY_HOSTNAME = "VerifyHostname";
+	//  null means the VerifyHostname property has not been read yet
+	private volatile Boolean verifyHostname;
 	private boolean requireSecure = false;
 
 
@@ -751,6 +756,10 @@ public class FtpClient extends SecureBaseObject implements FTP {
 					// Unconnected first so we can use a connect timeout
 					Socket tmp = getSocketFactory().createSocket();
 					try {
+						if( tmp instanceof SSLSocket ) {
+							//  Implicit TLS: SNI and the host name check, before the handshake
+							TlsSockets.configureClient((SSLSocket) tmp, host, isVerifyHostname());
+						}
 						tmp.setKeepAlive(true);
 						tmp.setTcpNoDelay(true);
 						tmp.connect(new java.net.InetSocketAddress(host, port), timeout);
@@ -1885,6 +1894,33 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 	}
 
 	/**
+	 * @return true (the default) if secure connections (implicit TLS and AUTH TLS) check that the
+	 *  server's certificate was issued for the host name (or address) being connected to. Without
+	 *  this check any certificate the trust managers accept is accepted for every host, so a server
+	 *  with any trusted certificate could pretend to be another. The VerifyHostname property
+	 *  ("false") changes the default.
+	 */
+	public boolean isVerifyHostname() {
+		Boolean ret = verifyHostname;
+		if( ret == null ) {
+			ret = getBooleanProperty(PROPERTY_VERIFY_HOSTNAME, true);
+			verifyHostname = ret;
+		}
+		return ret;
+	}
+
+	/**
+	 * Turn the host name check for secure connections on or off. Turn it off only for servers
+	 * whose certificate is known not to match the name used to reach them (a test certificate, or
+	 * a server reached by an address its certificate doesn't list).
+	 *
+	 * @param verifyHostname
+	 */
+	public void setVerifyHostname(boolean verifyHostname) {
+		this.verifyHostname = verifyHostname;
+	}
+
+	/**
 	 * If requireSecure is true the client will refuse to make an insecure connection.
 	 *  
 	 * @return true if the client should require a secure channel
@@ -1974,12 +2010,9 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 		SSLSocketFactory factory = ctx.getSocketFactory();
 
 		// With the host (it was null), Java caches the session under this host and port,
-		// which is what lets data connections resume it (see secureDataSocket, BJL-18)
-		Socket layered = factory.createSocket(socket,getHost(), socket.getPort(), false);
-		if( !(layered instanceof SSLSocket) ) {
-			throw new IOException("TLS socket factory returned "+layered.getClass().getName());
-		}
-		sslSocket = (SSLSocket) layered;
+		// which is what lets data connections resume it (see secureDataSocket, BJL-18).
+		// TlsSockets also sets SNI and the host name check (it had none).
+		sslSocket = TlsSockets.layer(ctx, socket, getHost(), true, isVerifyHostname(), false);
 		sslSocket.setWantClientAuth(false);
 		sslSocket.startHandshake();
 		channelSecure = true;
