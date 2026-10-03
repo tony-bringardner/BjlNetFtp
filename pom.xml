@@ -152,6 +152,15 @@
 		</repository>
 	</distributionManagement>
 
+	<!-- bjl_core (and the other BJL packages) are published to GitHub Packages; the id matches the
+	     <server> with the GitHub credentials in ~/.m2/settings.xml. -->
+	<repositories>
+		<repository>
+			<id>github</id>
+			<url>https://maven.pkg.github.com/tony-bringardner/BjlCore</url>
+		</repository>
+	</repositories>
+
 	<dependencies>
 		<!--
 		  Declared here (BjlNetFtp uses it directly) so this version wins over the older
@@ -161,7 +170,7 @@
 		<dependency>
 			<groupId>us.bringardner</groupId>
 			<artifactId>bjl_core</artifactId>
-			<version>1.2.0-SNAPSHOT</version>
+			<version>1.2.0</version>
 		</dependency>
 		<dependency>
 			<groupId>us.bringardner</groupId>
