@@ -12,6 +12,7 @@ import java.io.OutputStream;
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadMXBean;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -43,7 +44,12 @@ public class TestVirtualTransfers {
 
 	private static final int PORT = 8044;
 	private static final int SESSIONS = 60;
-	private static final int SIZE = 4 * 1024 * 1024;
+	//  Big enough that a transfer can't finish into the socket buffers while the client isn't reading:
+	//  Linux lets a loopback connection buffer up to 4 MB sent plus 32 MB received, so with a 4 MB file
+	//  some transfers finished early and sent 226 where the test expected the NOOP reply (200).
+	private static final int SIZE = 16 * 1024 * 1024;
+	//  The client's receive buffer for the data connections, set before connecting (so the TCP window is small)
+	private static final int CLIENT_RECEIVE_BUFFER = 64 * 1024;
 	private static FtpServer server;
 	private static byte[] content;
 
@@ -193,7 +199,9 @@ public class TestVirtualTransfers {
 			String r = send("EPSV");
 			Matcher m = EPSV.matcher(r);
 			assertTrue(TestVirtualTransfers.code(r) == 229 && m.find(), r);
-			Socket s = new Socket(InetAddress.getLoopbackAddress(), Integer.parseInt(m.group(1)));
+			Socket s = new Socket();
+			s.setReceiveBufferSize(CLIENT_RECEIVE_BUFFER);
+			s.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), Integer.parseInt(m.group(1))), 20000);
 			s.setSoTimeout(20000);
 			return s;
 		}
