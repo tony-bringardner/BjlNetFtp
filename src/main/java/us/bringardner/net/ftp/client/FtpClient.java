@@ -60,6 +60,7 @@ import us.bringardner.io.CRLFLineReader;
 import us.bringardner.io.CRLFLineWriter;
 import us.bringardner.net.ftp.FTP;
 import us.bringardner.net.ftp.server.commands.Site;
+import us.bringardner.io.IoUtils;
 
 /**
  * @author Tony Bringardner
@@ -768,10 +769,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 							tmp.setSoLinger(true, linger);
 						}
 					} catch (IOException e) {
-						try {
-							tmp.close();
-						} catch (IOException e1) {
-						}
+						IoUtils.closeQuietly(tmp);
 						throw e;
 					}
 					logDebug("Connected to "+host+":"+port+" timeout="+timeout+" linger = "+linger);
@@ -872,10 +870,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 			channelSecure = false;
 			dataChannelSecure = false;
 			if( s != null ) {
-				try {
-					s.close();
-				} catch (IOException e) {
-				}
+				IoUtils.closeQuietly(s);
 			}
 		} finally {
 			commandLock.unlock();
@@ -911,9 +906,7 @@ public class FtpClient extends SecureBaseObject implements FTP {
 					}
 
 				}
-				try {
-					socket.close();
-				} catch(Exception ex) {}
+				IoUtils.closeQuietly(socket);
 			}
 			socket = null;
 			input = null;

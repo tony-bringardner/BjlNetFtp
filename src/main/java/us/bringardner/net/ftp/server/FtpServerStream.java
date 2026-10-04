@@ -41,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 
 import us.bringardner.core.BaseThread;
 import us.bringardner.net.ftp.FTP;
+import us.bringardner.io.IoUtils;
 
 /**
  * A thread to transfer data either direction so the processor is not blocked.
@@ -189,7 +190,7 @@ public class FtpServerStream extends BaseThread {
 	public void stop() {
 		super.stop();
 		if( !finished ) {
-			closeQuietly(socket);
+			IoUtils.closeQuietly(socket);
 		}
 	}
 
@@ -199,7 +200,7 @@ public class FtpServerStream extends BaseThread {
 	 * The data socket is left alone because it may be shared with the running transfer.
 	 */
 	void discard() {
-		closeQuietly(upload ? output : input);
+		IoUtils.closeQuietly(upload ? output : input);
 		if( completionHandler != null ) {
 			try {
 				completionHandler.transferComplete(false);
@@ -336,8 +337,8 @@ public class FtpServerStream extends BaseThread {
 				}
 				FtpRequestProcessor.shutdownTlsOutput(socket);
 			}
-			closeQuietly(remote);
-			closeQuietly(socket);
+			IoUtils.closeQuietly(remote);
+			IoUtils.closeQuietly(socket);
 
 			String commitError = null;
 			if( completionHandler != null ) {
@@ -403,13 +404,4 @@ public class FtpServerStream extends BaseThread {
 		return control != null && !control.isClosed();
 	}
 
-	private static void closeQuietly(Closeable c) {
-		if( c != null ) {
-			try {
-				c.close();
-			} catch (Exception e) {
-				// cleanup after the transfer's result was decided (see spotbugs-exclude.xml)
-			}
-		}
-	}
 }

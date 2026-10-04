@@ -35,6 +35,7 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 
 import javax.net.ServerSocketFactory;
+import us.bringardner.io.IoUtils;
 
 /**
  * The server side of a passive (PASV / EPSV) data connection.
@@ -99,10 +100,7 @@ public  class PassiveSocket {
 				// Port in use (or not permitted), try the next one.
 				last = e;
 				if( svr != null ) {
-					try {
-						svr.close();
-					} catch (IOException e1) {
-					}
+					IoUtils.closeQuietly(svr);
 				}
 			}
 		}
@@ -153,10 +151,7 @@ public  class PassiveSocket {
 
 	private void closeServerSocket() {
 		if( serverSocket != null ) {
-			try {
-				serverSocket.close();
-			} catch (IOException e) {
-			}
+			IoUtils.closeQuietly(serverSocket);
 			serverSocket = null;
 		}
 	}
@@ -184,10 +179,7 @@ public  class PassiveSocket {
 						// RFC 2577: don't let a third party steal the data connection
 						processor.logInfo("Rejected passive data connection from "+s.getInetAddress().getHostAddress()
 								+" (control connection is from "+processor.getConnection().getSocket().getInetAddress().getHostAddress()+")");
-						try {
-							s.close();
-						} catch (IOException e) {
-						}
+						IoUtils.closeQuietly(s);
 						long remaining = deadline - System.currentTimeMillis();
 						if( remaining <= 0 ) {
 							throw new SocketTimeoutException("No valid passive data connection");

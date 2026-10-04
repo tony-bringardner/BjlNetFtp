@@ -162,6 +162,12 @@
 	</repositories>
 
 	<dependencies>
+		<!-- Used directly (IoUtils), so named here too -->
+		<dependency>
+			<groupId>us.bringardner</groupId>
+			<artifactId>bjl_io</artifactId>
+			<version>1.1.1-SNAPSHOT</version>
+		</dependency>
 		<!--
 		  Declared here (BjlNetFtp uses it directly) so this version wins over the older
 		  bjl_core that bjl_file_system brings: bjl_net_framework 1.0.2 needs 1.2.0's

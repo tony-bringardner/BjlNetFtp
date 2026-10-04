@@ -41,6 +41,7 @@ import us.bringardner.net.framework.server.IRequestContext;
 import us.bringardner.net.ftp.FTP;
 import us.bringardner.net.ftp.server.FtpCommand;
 import us.bringardner.net.ftp.server.FtpRequestProcessor;
+import us.bringardner.io.IoUtils;
 
 /**
  * @author Tony Bringardner
@@ -113,10 +114,7 @@ public abstract class BaseCommand implements FtpCommand ,FTP {
 		} catch (IOException e) {
 			dataError = e;
 		} finally {
-			try {
-				sock.close();
-			} catch (IOException e) {
-			}
+			IoUtils.closeQuietly(sock);
 		}
 		if( dataError != null ) {
 			processor.logDebug("Listing aborted after "+sent+" entries", dataError);

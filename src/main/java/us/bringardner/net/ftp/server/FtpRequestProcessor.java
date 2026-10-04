@@ -57,6 +57,7 @@ import us.bringardner.net.framework.server.AbstractCommandProcessor;
 import us.bringardner.net.framework.server.IPrincipal;
 import us.bringardner.net.framework.server.IServer;
 import us.bringardner.net.ftp.FTP;
+import us.bringardner.io.IoUtils;
 
 /**
  * @author Tony Bringardner
@@ -857,10 +858,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		}
 
 		if(dataSocket != null ) {
-			try {
-				dataSocket.close();
-			} catch (IOException ex) {
-			}
+			IoUtils.closeQuietly(dataSocket);
 			dataSocket = null;
 		}
 
@@ -990,10 +988,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			started = true;
 		} finally {
 			if( !started ) {
-				try {
-					in.close();
-				} catch (IOException e) {
-				}
+				IoUtils.closeQuietly(in);
 			}
 		}
 	}
@@ -1067,20 +1062,14 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 		Socket sock = getDataSocket();
 
 		if( sock == null ){
-			try {
-				out.close();
-			} catch (IOException e) {
-			}
+			IoUtils.closeQuietly(out);
 			reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data socket");
 		} else {
 			InputStream in;
 			try {
 				in = sock.getInputStream();
 			} catch (IOException e) {
-				try {
-					out.close();
-				} catch (IOException e1) {
-				}
+				IoUtils.closeQuietly(out);
 				reply(REPLY_425_CANT_OPEN_DATA_CON,"Can't open data connection: "+e.getMessage());
 				return;
 			}
@@ -1144,10 +1133,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			}
 		} catch (Exception e) {
 			logError("Can't open "+target+" for writing", e);
-			try {
-				sock.close();
-			} catch (IOException e1) {
-			}
+			IoUtils.closeQuietly(sock);
 			reply(REPLY_553_FILE_NAME_NOT_ALLOWED,"Can't write "+getDisplayFileName(target.getName())+": "+e.getMessage());
 			return;
 		}
@@ -1313,10 +1299,7 @@ public class FtpRequestProcessor extends AbstractCommandProcessor implements FTP
 			ret.setSoTimeout(getActivityTimeOut());
 			return ret;
 		} catch (IOException e) {
-			try {
-				ret.close();
-			} catch (IOException e1) {
-			}
+			IoUtils.closeQuietly(ret);
 			throw e;
 		}
 	}

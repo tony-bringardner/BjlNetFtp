@@ -43,6 +43,7 @@ import javax.net.SocketFactory;
 
 import us.bringardner.core.BaseObject;
 import us.bringardner.net.ftp.FTP;
+import us.bringardner.io.IoUtils;
 
 /**
  * A client data connection (PASV/EPSV or PORT/EPRT). Transfers run on the caller's thread;
@@ -178,10 +179,7 @@ public abstract class ClientDataTransferProcess extends BaseObject implements FT
 		ServerSocket svr = listener;
 		listener = null;
 		if( svr != null ) {
-			try {
-				svr.close();
-			} catch (IOException e) {
-			}
+			IoUtils.closeQuietly(svr);
 		}
 	}
 	
@@ -206,10 +204,7 @@ public abstract class ClientDataTransferProcess extends BaseObject implements FT
 				ret = client.secureDataSocket(ret);
 			}
 		} catch (IOException e) {
-			try {
-				ret.close();
-			} catch (IOException e1) {
-			}
+			IoUtils.closeQuietly(ret);
 			throw e;
 		}
 		if( isDebugEnabled() ) {
