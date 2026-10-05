@@ -36,8 +36,6 @@ import java.util.Date;
 
 import us.bringardner.core.BaseObject;
 import us.bringardner.net.ftp.FTP;
-import us.bringardner.net.ftp.server.commands.List;
-import us.bringardner.net.ftp.server.commands.Mlst;
 
 
 
@@ -206,178 +204,35 @@ public class FtpClientFile extends BaseObject {
 		return parentFile;
 	}
 
-	/**
-	 * Local helper function to clean up the entry 
-	 * by removing unwanted spaces.  This just makes it 
-	 * easier to parser the entry.
-	 *  
-	 * @param entry received from remote system
-	 * @return entry with unwanted spaces removed.
-	 */
-	private String cleanup(String entry) {
-
-		StringBuilder ret = new StringBuilder(entry.length());
-		// Work on chars: the old byte-based version used a UTF-8 byte index as a String
-		// index, which garbled names when owner/group contained non-ASCII characters.
-		char [] data = entry.toCharArray();
-		char lst;
-		/*  /services/home/thewallicks.com/Backup/marie/My Documents/JFS
-		 * 
-		 * There are 9 data sections in an entry separated by whitespace.
-		 * the last one is the name but it could contain whitespace.
-		 * So, we want to stop before we change the name.
-		 */
-		int section=0;
-		int idx=0;
-		for (; section < 8 && idx < data.length; idx++) {
-			if((lst=data[idx]) == ' ') {
-				section++;
-				while( idx+1 < data.length && (data[idx+1]==' ' || data[idx+1]=='\t')) {
-					idx++;
-				}
-
-			}
-			ret.append(lst);
-		}
-
-		//  We've found the name so use it to set our field
-		name = entry.substring(idx).trim();
-
-		return ret.toString();
-	}
-
 	private void parseEntry(String entry) throws IOException {
-
-		if(client.isMlstSupported() ){
-			parseMlstEntry(entry);
-		} else {
-			parseUnixEntry(entry);
-		}
-
+		//  The parsing is shared with bjl_file_system_ftp's FtpFile, see ListEntry
+		ListEntry e = ListEntry.parse(entry, client.isMlstSupported(), this::logError);
+		name = e.getName();
+		owner = e.getOwner();
+		group = e.getGroup();
+		length = e.getLength();
+		lastModified = e.getLastModified();
+		type = e.getType();
+		permissions = e.getPermissions();
+		mlstPermissions = e.getMlstPermissions();
 	}
 
 	/**
-	 * Split an MLSx entry into its facts and pathname (RFC 3659 section 7.2): the facts each
-	 * end with ';', then one space, then the pathname, which may itself contain spaces or ';'.
-	 * Servers used to be read as if the entry ended with a bare name; RFC 3659 servers (and
-	 * this project's server since BJL-48) send the whole pathname for MLST.
-	 * @param entry an MLST or MLSD line (a leading space is allowed)
-	 * @return { facts, pathname }, or null if the line isn't an MLSx entry
+	 * @see ListEntry#splitMlsxEntry(String)
+	 * @deprecated moved to {@link ListEntry#splitMlsxEntry(String)}
 	 */
+	@Deprecated
 	public static String[] splitMlsxEntry(String entry) {
-		if( entry == null ) {
-			return null;
-		}
-		int start = 0;
-		while( start < entry.length() && entry.charAt(start) == ' ' ) {
-			start++;
-		}
-		// The facts end at the first "; ": a fact value can't contain ';' but may contain a
-		// space (a Windows owner such as "NT AUTHORITY\SYSTEM")
-		int end = entry.indexOf("; ", start);
-		if( end < 0 ) {
-			return null;
-		}
-		return new String[] { entry.substring(start, end+1), entry.substring(end+2) };
+		return ListEntry.splitMlsxEntry(entry);
 	}
 
 	/**
-	 * @param pathname the pathname from an MLSx entry: a name (MLSD) or a whole path (MLST)
-	 * @return the last part of it, the file's name
+	 * @see ListEntry#mlsxName(String)
+	 * @deprecated moved to {@link ListEntry#mlsxName(String)}
 	 */
+	@Deprecated
 	public static String mlsxName(String pathname) {
-		String p = pathname;
-		while( p.length() > 1 && p.endsWith("/") ) {
-			p = p.substring(0, p.length()-1);
-		}
-		int idx = p.lastIndexOf('/');
-		return idx >= 0 ? p.substring(idx+1) : p;
-	}
-
-	private void parseMlstEntry(String entry) {
-		// RFC 3659 section 7.2: facts (each ending with ';'), one space, then the pathname.
-		// MLST gives the whole pathname (/dir/a.txt), MLSD usually just the name (BJL-49).
-		String [] split = splitMlsxEntry(entry);
-		String [] parts = split == null ? new String[0] : split[0].split(";");
-		if( parts.length < 3 ) {
-			//  Can't be a valid MLST entry
-			parseUnixEntry(entry);
-			return;
-		}
-		name = mlsxName(split[1]);
-
-		for (int idx = 0,sz=parts.length; idx < sz; idx++) {
-			String [] tmp = parts[idx].split("=");
-			String fact = tmp[0].trim().toUpperCase(java.util.Locale.ROOT);
-			if( fact.equals(FTP.MODIFY)) {
-				/*
-				 *    Symbolically, a time-val may be viewed as
-				 *
-				 * YYYYMMDDHHMMSS.sss
-				 *
-				 * The "." and subsequent digits ("sss") are optional.  However the "."
-				 * MUST NOT appear unless at least one following digit also appears.
-				 * 
-				 */
-				try {
-					lastModified = Mlst.parseTime(tmp[1]);
-				} catch (java.time.DateTimeException e) {
-					logError("Can't parse time "+tmp[1],e);
-				}
-			} else if( fact.equals(FTP.PERM)) {
-				if( tmp.length > 1) {
-					mlstPermissions = tmp[1].toLowerCase(java.util.Locale.ROOT);
-				}
-			} else if( fact.equals(FTP.SIZE)) {
-				length = Long.parseLong(tmp[1]);
-			} else if( fact.equals(FTP.TYPE)) {
-				if(tmp[1].equalsIgnoreCase("file")) {
-					type = TYPE_FILE;
-				} else {
-					type = TYPE_DIR;
-				}
-			}
-		}
-
-	}
-
-
-
-	private void parseUnixEntry(String entry) {
-		//  perms   links owner       group  size  mm  dd hh:mm name   
-		//drwxrwxrwx   4 QSYS           0    51200 Feb  9 21:28 home
-		//-rw-------   1 peter                848  Dec 14 11:22 00README.txt
-		//2> validate format
-		// ??  How ??
-		//1> Eliminate any double spaces in the text
-		//int permPos = 0;
-		//int linksPos = 1;
-		int ownerPos = 2;
-		int groupPos = 3;
-		int sizePos = 4;
-		int monthPos = 5;
-		int dayPos = 6;
-		int timePos = 7;
-
-		/*
-		 * Cleanup will remove filler spaces and set the name 
-		 */
-		entry = cleanup(entry.trim());
-
-		type = entry.charAt(0);
-		permissions = entry.substring(1,10).toCharArray();
-		String [] parts = entry.split(" ");
-		owner = parts[ownerPos];
-		group = parts[groupPos];
-
-		length = Long.parseLong(parts[sizePos]);
-
-		try {
-			lastModified = List.parseListDate(parts[monthPos], parts[dayPos], parts[timePos], java.time.ZoneId.systemDefault(), System.currentTimeMillis());
-		} catch (java.time.DateTimeException e) {
-			logError("Can't parse date / time val ='"+parts[monthPos]+" "+parts[dayPos]+" "+parts[timePos]+"' entry="+entry);
-		}
-
+		return ListEntry.mlsxName(pathname);
 	}
 
 	public boolean isDirectory() {

@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
-import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.time.DateTimeException;
 import java.time.LocalDateTime;
@@ -18,8 +17,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import us.bringardner.io.filesource.FileSource;
 import us.bringardner.io.filesource.FileSourceFactory;
-import us.bringardner.net.ftp.client.FtpClient;
 import us.bringardner.net.ftp.client.FtpClientFile;
+import us.bringardner.net.ftp.client.ListEntry;
 import us.bringardner.net.ftp.server.commands.List;
 
 /**
@@ -127,12 +126,10 @@ public class TestListDates {
 
 	@Test
 	public void clientReadsRecentEntriesWithTheRightYear() throws Exception {
-		FtpClientFile f = new FtpClientFile(new FtpClient("localhost", 1));
-		Method parse = FtpClientFile.class.getDeclaredMethod("parseUnixEntry", String.class);
-		parse.setAccessible(true);
 		LocalDateTime recent = LocalDateTime.now(ZoneId.systemDefault()).minusDays(3).withSecond(0).withNano(0);
 		String entry = "-rw-r--r--   1 tony  staff                       1330 " + List.RECENT_FORMAT.format(recent) + " a.txt";
-		parse.invoke(f, entry);
+		//  The client's LIST parsing (shared with bjl_file_system_ftp) is in ListEntry
+		ListEntry f = ListEntry.parse(entry, false, null);
 		assertEquals(recent.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), f.getLastModified(), entry);
 		assertEquals("a.txt", f.getName());
 	}
