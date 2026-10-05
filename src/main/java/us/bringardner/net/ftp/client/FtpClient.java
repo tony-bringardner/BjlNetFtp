@@ -1933,10 +1933,17 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 
 	/**
 	 * This is called before signing in when the connection is not secure.
-	 * If the server does not accept the AUTH then the channel will stay un-secured. 
-	 * @return true if a secure channel was negotiated.
+	 * If the server does not accept the AUTH then the channel will stay un-secured
+	 * (and {@link #isRequireSecure()} decides whether the client logs in anyway).
+	 * <p>
+	 * If the server accepts AUTH but TLS can't be set up (the handshake fails, or the certificate
+	 * is rejected), the connection is closed and an IOException thrown. It used to log the error,
+	 * try the next mechanism on the broken connection and, when the server then refused it, log in
+	 * over the plain connection: an attacker in the middle could accept AUTH, break the TLS step and
+	 * so get the login in clear text.
+	 * @return true if a secure channel was negotiated, false if the server didn't accept AUTH.
 	 * 
-	 * @throws IOException only in case a communication problem.
+	 * @throws IOException in case of a communication problem, or if TLS failed after the server accepted AUTH.
 	 */
 	private boolean executeAuth() throws IOException {
 		logDebug("Enter executeAuth");
@@ -1953,8 +1960,12 @@ transferred 3358 bytes in 0.016 seconds, 1679.000 Kbps ( 209.875 KBps), transfer
 						negotiateSecureSocket(type);
 						ret = true;
 						break;
-					} catch (Throwable e) {
-						logError("Server accepted the AUTH command but failed to establish a secure connection", e);						
+					} catch (IOException | RuntimeException e) {
+						//  The server expects TLS now and the connection is in an unknown state: never
+						//  carry on in plain text (or try another mechanism) on it
+						logError("Server accepted AUTH "+type+" but a secure connection could not be established", e);
+						close();
+						throw new IOException("Server accepted AUTH "+type+" but TLS could not be established: "+e.getMessage(), e);
 					}
 				}
 			}
