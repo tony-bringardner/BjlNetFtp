@@ -59,11 +59,15 @@
 	</Match>
 
 	<!--
-	  FtpClientFile.splitMlsxEntry returns null to mean "not an MLSx entry" (documented);
-	  an empty array would read as an entry with no parts. BjlFileSystemFtp relies on it.
+	  splitMlsxEntry returns null to mean "not an MLSx entry" (documented); an empty array
+	  would read as an entry with no parts. It is in ListEntry now; FtpClientFile's is a
+	  deprecated pass-through. BjlFileSystemFtp relies on it.
 	-->
 	<Match>
-		<Class name="us.bringardner.net.ftp.client.FtpClientFile"/>
+		<Or>
+			<Class name="us.bringardner.net.ftp.client.ListEntry"/>
+			<Class name="us.bringardner.net.ftp.client.FtpClientFile"/>
+		</Or>
 		<Method name="splitMlsxEntry"/>
 		<Bug pattern="PZLA_PREFER_ZERO_LENGTH_ARRAYS"/>
 	</Match>
