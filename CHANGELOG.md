@@ -77,6 +77,9 @@ those are released). They are published to GitHub Packages and the pom names the
   garbled, and address octets over 127 are no longer negative.
 - Commands and data connections use locks instead of `synchronized`, so many clients used from virtual
   threads don't stall on Java 21-23 (BJL-58).
+- `ListEntry`: the LIST / MLSx entry parsing, public and shared with `bjl_file_system_ftp`'s `FtpFile`, which
+  had its own copy (with the old non-ASCII bug). `FtpClientFile.splitMlsxEntry` and `mlsxName` are
+  deprecated pass-throughs to it.
 - `getLastActivity()` was always 0 (its field was never updated); it now says when the control
   connection was last used.
 
